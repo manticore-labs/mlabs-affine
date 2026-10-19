@@ -61,7 +61,7 @@ export function openRequestBody(input: {
   datasetId?: string;
 }) {
   const body: Record<string, string> = {
-    command: 'dify-sources',
+    command: 'mlabs-framework',
     page_id: input.pageId,
   };
   const pageUrl = canonicalPageUrl(input.pageUrl);
@@ -103,7 +103,11 @@ export function statusLabel(status: string): string {
 
 export function humanBridgeError(code: string, detail?: string): string {
   const messages: Record<string, string> = {
-    bad_request: 'Falta el dataset de esta página. Cerrá el panel y volvé a abrir /dify-sources.',
+    bad_request:
+      'Falta el dataset de esta página. Cerrá el panel y volvé a abrir /mlabs-framework.',
+    bad_question: 'Escribí una pregunta antes de enviar.',
+    freellm_unconfigured: 'FreeLLMAPI no está configurado en el puente.',
+    freellm_unavailable: 'FreeLLMAPI no respondió. Probá de nuevo en un momento.',
     bad_json: 'La petición no es válida.',
     bad_name: 'El nombre no es válido (máx. 40 caracteres).',
     bad_description: 'La descripción es demasiado larga.',

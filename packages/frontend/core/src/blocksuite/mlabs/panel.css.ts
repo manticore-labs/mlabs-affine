@@ -129,3 +129,61 @@ export const loading = style({
   fontSize: 13,
   color: cssVarV2('text/secondary'),
 });
+
+export const tabList = style({
+  display: 'flex',
+  gap: 8,
+  marginBottom: 4,
+});
+
+export const tabTrigger = style({
+  fontSize: 13,
+  fontWeight: 500,
+  padding: '6px 10px',
+  borderRadius: 8,
+  border: 'none',
+  cursor: 'pointer',
+  background: cssVarV2('layer/background/secondary'),
+  color: cssVarV2('text/secondary'),
+  selectors: {
+    '&[data-state="active"]': {
+      background: cssVarV2('layer/background/primary'),
+      color: cssVarV2('text/primary'),
+      boxShadow: `inset 0 0 0 1px ${cssVarV2('layer/insideBorder/border')}`,
+    },
+    '&:disabled': {
+      opacity: 0.5,
+      cursor: 'not-allowed',
+    },
+  },
+});
+
+export const textarea = style({
+  width: '100%',
+  minHeight: 96,
+  padding: '8px 10px',
+  borderRadius: 8,
+  border: `1px solid ${cssVarV2('layer/insideBorder/border')}`,
+  fontSize: 13,
+  lineHeight: '20px',
+  fontFamily: 'inherit',
+  color: cssVarV2('text/primary'),
+  background: cssVarV2('layer/background/primary'),
+  resize: 'vertical',
+  boxSizing: 'border-box',
+});
+
+export const answerBox = style({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  marginTop: 4,
+});
+
+export const answerText = style({
+  margin: 0,
+  fontSize: 13,
+  lineHeight: '20px',
+  whiteSpace: 'pre-wrap',
+  color: cssVarV2('text/primary'),
+});

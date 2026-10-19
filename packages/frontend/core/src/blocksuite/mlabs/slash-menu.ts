@@ -1,17 +1,19 @@
 import { SlashMenuConfigExtension } from '@blocksuite/affine/widgets/slash-menu';
 
-import { mlabsCommands } from './loader';
+import { mlabsSlashCommands } from './loader';
 import { openDifySourcesPanel } from './panel';
+
+const PANEL_COMMANDS = new Set(['mlabs-framework', 'dify-sources']);
 
 export function MlabsSlashMenuConfigExtension() {
   return SlashMenuConfigExtension('mlabs', {
     items: () =>
-      mlabsCommands().map((spec, index) => ({
+      mlabsSlashCommands().map((spec, index) => ({
         name: spec.name,
         description: spec.description,
         group: `8_Mlabs@${index}` as `${number}_${string}@${number}`,
         action: ({ std }) => {
-          if (spec.name !== 'dify-sources') return;
+          if (!PANEL_COMMANDS.has(spec.name)) return;
           openDifySourcesPanel({
             pageId: std.store.id,
             pageUrl: globalThis.location?.href,

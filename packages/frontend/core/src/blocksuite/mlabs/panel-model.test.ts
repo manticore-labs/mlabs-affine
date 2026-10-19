@@ -32,7 +32,7 @@ test('the open body carries the page, the url and the stored id', () => {
       pageUrl: 'https://affine-pampa.manticore-labs.cc/workspace/w/page-1',
       datasetId: '68080011-1111-4111-8111-111111111111',
     }),
-    '{"command":"dify-sources","page_id":"page-1","page_url":"https://affine-pampa.manticore-labs.cc/workspace/w/page-1","dataset_id":"68080011-1111-4111-8111-111111111111"}'
+    '{"command":"mlabs-framework","page_id":"page-1","page_url":"https://affine-pampa.manticore-labs.cc/workspace/w/page-1","dataset_id":"68080011-1111-4111-8111-111111111111"}'
   );
   assert.equal(canonicalPageUrl('javascript:alert(1)'), undefined);
 });

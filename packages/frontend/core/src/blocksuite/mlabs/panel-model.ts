@@ -1,4 +1,4 @@
-export const PAGE_FILE_NAME = 'mlabs-page.json';
+export const PAGE_FILE_NAME = 'mlabs-page.txt';
 export const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -74,7 +74,9 @@ export function uploadRejection(name: string, size: number): string | null {
   if (!name || name.length > 200 || name.includes('/') || name.includes('\\')) {
     return 'Nombre de archivo inválido.';
   }
-  if (name === PAGE_FILE_NAME) return 'Ese archivo lo reserva el vínculo de la página.';
+  if (name === PAGE_FILE_NAME || name === 'mlabs-page.json') {
+    return 'Ese archivo lo reserva el vínculo de la página.';
+  }
   const extension = name.includes('.')
     ? name.slice(name.lastIndexOf('.') + 1).toLowerCase()
     : '';
@@ -88,13 +90,36 @@ export function uploadRejection(name: string, size: number): string | null {
 
 export function statusLabel(status: string): string {
   const labels: Record<string, string> = {
-    completed: 'listo',
-    error: 'error',
-    indexing: 'indexando',
-    waiting: 'en espera',
-    parsing: 'leyendo',
-    splitting: 'partiendo',
-    cleaning: 'limpiando',
+    completed: 'Listo',
+    error: 'Error',
+    indexing: 'Indexando',
+    waiting: 'En espera',
+    parsing: 'Leyendo',
+    splitting: 'Partiendo',
+    cleaning: 'Limpiando',
   };
   return labels[status] ?? status;
+}
+
+export function humanBridgeError(code: string, detail?: string): string {
+  const messages: Record<string, string> = {
+    bad_request: 'Falta el dataset de esta página. Cerrá el panel y volvé a abrir /dify-sources.',
+    bad_json: 'La petición no es válida.',
+    bad_name: 'El nombre no es válido (máx. 40 caracteres).',
+    bad_description: 'La descripción es demasiado larga.',
+    bad_type: 'Dify no acepta ese tipo de archivo.',
+    empty_file: 'El archivo está vacío.',
+    too_large: 'El archivo supera 15 MB.',
+    dataset_missing: 'No encontramos ese dataset en Dify.',
+    document_missing: 'Ese archivo ya no está en el dataset.',
+    page_file_protected: 'Ese archivo es el vínculo de la página y no se puede tocar aquí.',
+    name_taken: 'Ya hay otro dataset con ese nombre.',
+    dify_unconfigured: 'El puente a Dify no está configurado.',
+    dify_unavailable: 'Dify no respondió. Probá de nuevo en un momento.',
+    dify_rejected: 'Dify rechazó la operación.',
+    method_not_allowed: 'Método no permitido.',
+    not_found: 'Ruta no encontrada en el puente.',
+  };
+  const base = messages[code] ?? code;
+  return detail ? `${base} (${detail})` : base;
 }

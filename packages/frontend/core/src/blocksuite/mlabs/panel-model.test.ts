@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   canonicalPageUrl,
+  humanBridgeError,
   openRequestBody,
   readDatasetId,
   statusLabel,
@@ -38,15 +39,19 @@ test('the open body carries the page, the url and the stored id', () => {
 
 test('upload checks match the bridge rules', () => {
   assert.equal(uploadRejection('nota.txt', 4), null);
-  assert.equal(uploadRejection('mlabs-page.json', 4), 'Ese archivo lo reserva el vínculo de la página.');
+  assert.equal(
+    uploadRejection('mlabs-page.txt', 4),
+    'Ese archivo lo reserva el vínculo de la página.'
+  );
   assert.match(uploadRejection('paquete.zip', 4) ?? '', /no acepta/);
   assert.match(uploadRejection('grande.pdf', 15 * 1024 * 1024 + 1) ?? '', /15 MB/);
 });
 
-test('indexing status is shown in Spanish when we know it', () => {
-  assert.equal(statusLabel('completed'), 'listo');
-  assert.equal(statusLabel('indexing'), 'indexando');
-  assert.equal(statusLabel('paused'), 'paused');
+test('bridge errors are shown in Spanish', () => {
+  assert.match(humanBridgeError('bad_request'), /dataset/);
+  assert.match(humanBridgeError('bad_type'), /no acepta/);
+  assert.equal(statusLabel('completed'), 'Listo');
+  assert.equal(statusLabel('indexing'), 'Indexando');
 });
 
 function memoryDoc(): PageDoc {

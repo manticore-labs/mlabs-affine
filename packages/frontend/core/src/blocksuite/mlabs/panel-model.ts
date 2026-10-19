@@ -36,6 +36,7 @@ export type SourceDocument = {
   name: string;
   indexing_status: string;
   error: string | null;
+  change?: 'new' | 'modified' | 'unchanged';
 };
 
 export function readDatasetId(doc: PageDoc | undefined): string | undefined {
@@ -74,7 +75,11 @@ export function uploadRejection(name: string, size: number): string | null {
   if (!name || name.length > 200 || name.includes('/') || name.includes('\\')) {
     return 'Nombre de archivo inválido.';
   }
-  if (name === PAGE_FILE_NAME || name === 'mlabs-page.json') {
+  if (
+    name === PAGE_FILE_NAME ||
+    name === 'mlabs-page.json' ||
+    name === 'mlabs-sync-state.txt'
+  ) {
     return 'Ese archivo lo reserva el vínculo de la página.';
   }
   const extension = name.includes('.')
@@ -120,8 +125,31 @@ export function syncSummaryLabel(summary: {
   indexing: number;
   error: number;
   total: number;
+  new?: number;
+  modified?: number;
+  unchanged?: number;
+  removed?: number;
 }): string {
-  return `Listo ${summary.ready} · Indexando ${summary.indexing} · Error ${summary.error} (total ${summary.total}).`;
+  const hasChanges =
+    summary.new != null ||
+    summary.modified != null ||
+    summary.unchanged != null ||
+    summary.removed != null;
+  if (!hasChanges) {
+    return `Listo ${summary.ready} · Indexando ${summary.indexing} · Error ${summary.error} (total ${summary.total}).`;
+  }
+  return (
+    `Nuevas ${summary.new ?? 0} · Modificadas ${summary.modified ?? 0} · ` +
+    `Iguales ${summary.unchanged ?? 0} · Quitadas ${summary.removed ?? 0} · ` +
+    `Listo ${summary.ready} · Indexando ${summary.indexing} · Error ${summary.error}.`
+  );
+}
+
+export function changeLabel(change: SourceDocument['change']): string {
+  if (change === 'new') return 'Nueva';
+  if (change === 'modified') return 'Modificada';
+  if (change === 'unchanged') return 'Igual';
+  return '';
 }
 
 export function humanBridgeError(code: string, detail?: string): string {

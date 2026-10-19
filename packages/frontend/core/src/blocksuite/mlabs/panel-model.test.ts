@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   canonicalPageUrl,
+  changeLabel,
   humanBridgeError,
   indexingNotice,
   isDocumentIndexing,
@@ -73,6 +74,21 @@ test('indexing notice covers unfinished documents', () => {
     syncSummaryLabel({ ready: 1, indexing: 2, error: 0, total: 3 }),
     'Listo 1 · Indexando 2 · Error 0 (total 3).'
   );
+  assert.equal(
+    syncSummaryLabel({
+      ready: 1,
+      indexing: 0,
+      error: 0,
+      total: 1,
+      new: 0,
+      modified: 1,
+      unchanged: 0,
+      removed: 0,
+    }),
+    'Nuevas 0 · Modificadas 1 · Iguales 0 · Quitadas 0 · Listo 1 · Indexando 0 · Error 0.'
+  );
+  assert.equal(changeLabel('new'), 'Nueva');
+  assert.equal(changeLabel('modified'), 'Modificada');
 });
 
 function memoryDoc(): PageDoc {

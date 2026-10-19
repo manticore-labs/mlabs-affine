@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 
 import * as styles from './panel.css';
 import {
+  changeLabel,
   humanBridgeError,
   indexingNotice,
   openRequestBody,
@@ -274,6 +275,9 @@ export function DifySourcesPanel({
                         <span className={styles.itemName}>{item.name}</span>
                         <span className={styles.itemStatus}>
                           {statusLabel(item.indexing_status)}
+                          {changeLabel(item.change)
+                            ? ` · ${changeLabel(item.change)}`
+                            : ''}
                           {item.error ? ` · ${item.error}` : ''}
                         </span>
                       </div>
@@ -335,6 +339,10 @@ export function DifySourcesPanel({
                           indexing: number;
                           error: number;
                           total: number;
+                          new?: number;
+                          modified?: number;
+                          unchanged?: number;
+                          removed?: number;
                         };
                       };
                       setDocuments(body.documents ?? []);

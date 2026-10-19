@@ -20,6 +20,18 @@ const ALLOWED_EXTENSIONS = new Set([
 
 const DATASET_LINK = 'mlabs';
 const DATASET_KEY = 'dify_dataset_id';
+const WHY_KEY = 'why';
+
+export type WhyIndicator = 'leading' | 'lagging';
+
+export type WhyDraft = {
+  statement: string;
+  indicator_type: WhyIndicator;
+  from: string;
+  to: string;
+  unit: string;
+  okr_alignment: string;
+};
 
 type PageMap = {
   get: (key: string) => unknown;
@@ -49,6 +61,72 @@ export function writeDatasetId(doc: PageDoc, datasetId: string) {
   const apply = () => doc.getMap(DATASET_LINK).set(DATASET_KEY, datasetId);
   if (doc.transact) doc.transact(apply);
   else apply();
+}
+
+export function emptyWhy(): WhyDraft {
+  return {
+    statement: '',
+    indicator_type: 'leading',
+    from: '',
+    to: '',
+    unit: '',
+    okr_alignment: '',
+  };
+}
+
+export function readWhy(doc: PageDoc | undefined): WhyDraft {
+  const blank = emptyWhy();
+  if (!doc) return blank;
+  const raw = doc.getMap(DATASET_LINK).get(WHY_KEY);
+  if (typeof raw !== 'string' || raw.length === 0) return blank;
+  try {
+    const body = JSON.parse(raw) as Partial<WhyDraft>;
+    const indicator = body.indicator_type === 'lagging' ? 'lagging' : 'leading';
+    return {
+      statement: typeof body.statement === 'string' ? body.statement : '',
+      indicator_type: indicator,
+      from: typeof body.from === 'string' ? body.from : '',
+      to: typeof body.to === 'string' ? body.to : '',
+      unit: typeof body.unit === 'string' ? body.unit : '',
+      okr_alignment: typeof body.okr_alignment === 'string' ? body.okr_alignment : '',
+    };
+  } catch {
+    return blank;
+  }
+}
+
+export function writeWhy(doc: PageDoc, draft: WhyDraft) {
+  const payload = JSON.stringify({
+    statement: draft.statement.trim(),
+    indicator_type: draft.indicator_type,
+    from: draft.from.trim(),
+    to: draft.to.trim(),
+    unit: draft.unit.trim(),
+    okr_alignment: draft.okr_alignment.trim(),
+  });
+  const apply = () => doc.getMap(DATASET_LINK).set(WHY_KEY, payload);
+  if (doc.transact) doc.transact(apply);
+  else apply();
+}
+
+/** Business goal only. People/teams/roles stay in WHO (not this slice). */
+export function whyRejection(draft: WhyDraft): string | null {
+  const statement = draft.statement.trim();
+  if (statement.length === 0) return 'Escribí el objetivo de negocio.';
+  if (statement.length > 400) return 'El objetivo supera 400 caracteres.';
+  if (draft.indicator_type !== 'leading' && draft.indicator_type !== 'lagging') {
+    return 'Elegí leading o lagging.';
+  }
+  const from = Number(draft.from);
+  const to = Number(draft.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return 'From y To tienen que ser números.';
+  }
+  const unit = draft.unit.trim();
+  if (unit.length === 0 || unit.length > 40) return 'Indicá la unidad (máx. 40).';
+  const okr = draft.okr_alignment.trim();
+  if (okr.length > 200) return 'La alineación OKR supera 200 caracteres.';
+  return null;
 }
 
 export function canonicalPageUrl(value: string | undefined): string | undefined {

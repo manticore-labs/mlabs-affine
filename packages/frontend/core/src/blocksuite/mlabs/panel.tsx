@@ -9,12 +9,16 @@ import {
   indexingNotice,
   openRequestBody,
   readDatasetId,
+  readWhy,
   statusLabel,
   syncSummaryLabel,
   uploadRejection,
+  whyRejection,
   writeDatasetId,
+  writeWhy,
   type PageDoc,
   type SourceDocument,
+  type WhyDraft,
 } from './panel-model';
 
 const FRAMEWORK = '/mlabs/framework';
@@ -75,7 +79,8 @@ export function DifySourcesPanel({
   fetchImpl = globalThis.fetch.bind(globalThis),
   onClose,
 }: DifySourcesPanelProps) {
-  const [tab, setTab] = useState<'fuentes' | 'preguntar'>('fuentes');
+  const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'why'>('fuentes');
+  const [why, setWhy] = useState<WhyDraft>(() => readWhy(doc));
   const [busy, setBusy] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -205,6 +210,9 @@ export function DifySourcesPanel({
             </Tabs.Trigger>
             <Tabs.Trigger value="preguntar" className={styles.tabTrigger} disabled={!ready}>
               Preguntar
+            </Tabs.Trigger>
+            <Tabs.Trigger value="why" className={styles.tabTrigger}>
+              WHY
             </Tabs.Trigger>
           </Tabs.List>
 
@@ -414,6 +422,102 @@ export function DifySourcesPanel({
               <p className={styles.lead}>
                 pdf, md, txt, docx y similares. Hasta 15 MB. Mismo nombre = reemplazo.
               </p>
+            </section>
+          </Tabs.Content>
+
+          <Tabs.Content value="why">
+            <section className={styles.section}>
+              <p className={styles.lead}>
+                Objetivo de negocio (KPI / costo / ingreso). Sin software ni
+                features. Preferí un indicador leading. Gente, equipos y roles
+                quedan para WHO, después de este WHY.
+              </p>
+              <label className={styles.field}>
+                <span>Objetivo</span>
+                <textarea
+                  className={styles.textarea}
+                  value={why.statement}
+                  maxLength={400}
+                  disabled={!doc || actionBusy}
+                  onChange={event =>
+                    setWhy(current => ({ ...current, statement: event.target.value }))
+                  }
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Tipo de indicador</span>
+                <select
+                  value={why.indicator_type}
+                  disabled={!doc || actionBusy}
+                  onChange={event =>
+                    setWhy(current => ({
+                      ...current,
+                      indicator_type: event.target.value === 'lagging' ? 'lagging' : 'leading',
+                    }))
+                  }
+                >
+                  <option value="leading">Leading</option>
+                  <option value="lagging">Lagging</option>
+                </select>
+              </label>
+              <label className={styles.field}>
+                <span>From</span>
+                <Input
+                  value={why.from}
+                  disabled={!doc || actionBusy}
+                  onChange={value => setWhy(current => ({ ...current, from: value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span>To</span>
+                <Input
+                  value={why.to}
+                  disabled={!doc || actionBusy}
+                  onChange={value => setWhy(current => ({ ...current, to: value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Unidad</span>
+                <Input
+                  value={why.unit}
+                  maxLength={40}
+                  disabled={!doc || actionBusy}
+                  onChange={value => setWhy(current => ({ ...current, unit: value }))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Alineación OKR</span>
+                <Input
+                  value={why.okr_alignment}
+                  maxLength={200}
+                  disabled={!doc || actionBusy}
+                  onChange={value =>
+                    setWhy(current => ({ ...current, okr_alignment: value }))
+                  }
+                />
+              </label>
+              <div className={styles.actions}>
+                <Button
+                  variant="primary"
+                  disabled={!doc || actionBusy}
+                  onClick={() => {
+                    const problem = whyRejection(why);
+                    if (problem) {
+                      notify.error({ title: 'Mlabs Framework', message: problem });
+                      return;
+                    }
+                    if (!doc) return;
+                    writeWhy(doc, why);
+                    setWhy(readWhy(doc));
+                    notify.success({
+                      title: 'Mlabs Framework',
+                      message: 'WHY guardado en esta página.',
+                    });
+                  }}
+                >
+                  Guardar WHY
+                </Button>
+              </div>
             </section>
           </Tabs.Content>
 

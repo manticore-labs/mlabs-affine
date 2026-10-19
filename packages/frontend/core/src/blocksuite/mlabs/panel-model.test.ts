@@ -4,15 +4,19 @@ import { test } from 'node:test';
 import {
   canonicalPageUrl,
   changeLabel,
+  emptyWhy,
   humanBridgeError,
   indexingNotice,
   isDocumentIndexing,
   openRequestBody,
   readDatasetId,
+  readWhy,
   statusLabel,
   syncSummaryLabel,
   uploadRejection,
+  whyRejection,
   writeDatasetId,
+  writeWhy,
   type PageDoc,
 } from './panel-model.ts';
 
@@ -89,6 +93,29 @@ test('indexing notice covers unfinished documents', () => {
   );
   assert.equal(changeLabel('new'), 'Nueva');
   assert.equal(changeLabel('modified'), 'Modificada');
+});
+
+test('the WHY contract is stored on the page document', () => {
+  const doc = memoryDoc();
+  assert.equal(whyRejection(emptyWhy()), 'Escribí el objetivo de negocio.');
+  const draft = {
+    statement: '  Bajar el costo de permanencia  ',
+    indicator_type: 'leading' as const,
+    from: '12',
+    to: '8',
+    unit: 'horas/semana',
+    okr_alignment: ' OKR Q4 ',
+  };
+  assert.equal(whyRejection(draft), null);
+  assert.match(whyRejection({ ...draft, from: 'no' }) ?? '', /números/);
+  writeWhy(doc, draft);
+  const stored = readWhy(doc);
+  assert.equal(stored.statement, 'Bajar el costo de permanencia');
+  assert.equal(stored.indicator_type, 'leading');
+  assert.equal(stored.from, '12');
+  assert.equal(stored.to, '8');
+  assert.equal(stored.unit, 'horas/semana');
+  assert.equal(stored.okr_alignment, 'OKR Q4');
 });
 
 function memoryDoc(): PageDoc {

@@ -2,15 +2,26 @@ export type MlabsCommandSpec = {
   name: string;
   description: string;
   endpoint: string;
+  /** When false, slash menu hides the command but it stays registered. */
+  showInSlashMenu?: boolean;
 };
 
 const extra: MlabsCommandSpec[] = [];
 
+const FRAMEWORK_ENDPOINT = '/mlabs/framework';
+
 const builtins: MlabsCommandSpec[] = [
   {
+    name: 'mlabs-framework',
+    description: 'Fuentes y preguntas sobre el dataset de esta página',
+    endpoint: FRAMEWORK_ENDPOINT,
+    showInSlashMenu: true,
+  },
+  {
     name: 'dify-sources',
-    description: 'Create the Dify dataset for this page',
-    endpoint: '/mlabs/dify-sources',
+    description: 'Alias legacy del panel Mlabs Framework',
+    endpoint: FRAMEWORK_ENDPOINT,
+    showInSlashMenu: false,
   },
 ];
 
@@ -20,6 +31,10 @@ export function registerMlabsCommand(spec: MlabsCommandSpec) {
 
 export function mlabsCommands(): MlabsCommandSpec[] {
   return [...builtins, ...extra];
+}
+
+export function mlabsSlashCommands(): MlabsCommandSpec[] {
+  return mlabsCommands().filter(spec => spec.showInSlashMenu !== false);
 }
 
 export function mlabsCommandBody(spec: MlabsCommandSpec, pageId: string) {

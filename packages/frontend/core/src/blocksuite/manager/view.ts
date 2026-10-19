@@ -18,6 +18,7 @@ import {
 import { ElectronViewExtension } from '@affine/core/blocksuite/view-extensions/electron';
 import { AffineIconPickerExtension } from '@affine/core/blocksuite/view-extensions/icon-picker';
 import { AffineLinkPreviewExtension } from '@affine/core/blocksuite/view-extensions/link-preview-service';
+import { MlabsViewExtension } from '@affine/core/blocksuite/view-extensions/mlabs';
 import { MobileViewExtension } from '@affine/core/blocksuite/view-extensions/mobile';
 import { PdfViewExtension } from '@affine/core/blocksuite/view-extensions/pdf';
 import { AffineThemeViewExtension } from '@affine/core/blocksuite/view-extensions/theme';
@@ -64,6 +65,7 @@ type Configure = {
     enableComment?: boolean,
     framework?: FrameworkProvider
   ) => Configure;
+  mlabs: () => Configure;
 
   value: ViewExtensionManager;
 };
@@ -100,6 +102,7 @@ class ViewProvider {
       AffineLinkPreviewExtension,
       AffineDatabaseViewExtension,
       CommentViewExtension,
+      MlabsViewExtension,
     ]);
   }
 
@@ -128,6 +131,7 @@ class ViewProvider {
       codeBlockPreview: this._configureCodeBlockHtmlPreview,
       iconPicker: this._configureIconPicker,
       comment: this._configureComment,
+      mlabs: this._configureMlabs,
       value: this._manager,
     };
   }
@@ -151,7 +155,8 @@ class ViewProvider {
       .linkPreview()
       .codeBlockPreview()
       .iconPicker()
-      .comment();
+      .comment()
+      .mlabs();
 
     return this.config;
   };
@@ -357,6 +362,11 @@ class ViewProvider {
       enabled: enableComment,
     });
 
+    return this.config;
+  };
+
+  private readonly _configureMlabs = () => {
+    this._manager.configure(MlabsViewExtension, {});
     return this.config;
   };
 }

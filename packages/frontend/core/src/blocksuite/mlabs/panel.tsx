@@ -5,9 +5,11 @@ import { createRoot } from 'react-dom/client';
 import * as styles from './panel.css';
 import {
   humanBridgeError,
+  indexingNotice,
   openRequestBody,
   readDatasetId,
   statusLabel,
+  syncSummaryLabel,
   uploadRejection,
   writeDatasetId,
   type PageDoc,
@@ -157,6 +159,7 @@ export function DifySourcesPanel({
   };
 
   const ready = Boolean(datasetId) && !busy;
+  const askIndexingHint = indexingNotice(documents);
 
   return (
     <Modal
@@ -183,7 +186,18 @@ export function DifySourcesPanel({
           </p>
         ) : null}
 
-        <Tabs.Root value={tab} onValueChange={value => setTab(value as typeof tab)}>
+        <Tabs.Root
+          value={tab}
+          onValueChange={value => {
+            const next = value as typeof tab;
+            setTab(next);
+            if (next === 'preguntar' && datasetId) {
+              void refresh(datasetId).catch(() => {
+                /* keep last known list if refresh fails */
+              });
+            }
+          }}
+        >
           <Tabs.List className={styles.tabList}>
             <Tabs.Trigger value="fuentes" className={styles.tabTrigger}>
               Fuentes
@@ -303,6 +317,39 @@ export function DifySourcesPanel({
                 <Button
                   variant="secondary"
                   disabled={!ready || actionBusy}
+                  onClick={() =>
+                    void run('No pude sincronizar.', async () => {
+                      if (!datasetId) return;
+                      const response = await fetchImpl(`${FRAMEWORK}/sync`, {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ dataset_id: datasetId }),
+                      });
+                      if (!response.ok) {
+                        throw new Error(await readBridgeError(response));
+                      }
+                      const body = (await response.json()) as {
+                        documents: SourceDocument[];
+                        summary: {
+                          ready: number;
+                          indexing: number;
+                          error: number;
+                          total: number;
+                        };
+                      };
+                      setDocuments(body.documents ?? []);
+                      notify.success({
+                        title: 'Sincronizar',
+                        message: syncSummaryLabel(body.summary),
+                      });
+                    })
+                  }
+                >
+                  Sincronizar
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!ready || actionBusy}
                   onClick={() => {
                     const input = globalThis.document.createElement('input');
                     input.type = 'file';
@@ -368,6 +415,9 @@ export function DifySourcesPanel({
                 La respuesta usa fragmentos recuperados del dataset vía Dify y FreeLLMAPI en el
                 servidor.
               </p>
+              {askIndexingHint ? (
+                <p className={styles.notice}>{askIndexingHint}</p>
+              ) : null}
               <label className={styles.field}>
                 <span>Pregunta</span>
                 <textarea

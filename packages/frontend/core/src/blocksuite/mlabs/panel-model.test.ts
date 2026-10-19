@@ -4,9 +4,12 @@ import { test } from 'node:test';
 import {
   canonicalPageUrl,
   humanBridgeError,
+  indexingNotice,
+  isDocumentIndexing,
   openRequestBody,
   readDatasetId,
   statusLabel,
+  syncSummaryLabel,
   uploadRejection,
   writeDatasetId,
   type PageDoc,
@@ -52,6 +55,24 @@ test('bridge errors are shown in Spanish', () => {
   assert.match(humanBridgeError('bad_type'), /no acepta/);
   assert.equal(statusLabel('completed'), 'Listo');
   assert.equal(statusLabel('indexing'), 'Indexando');
+});
+
+test('indexing notice covers unfinished documents', () => {
+  assert.equal(isDocumentIndexing('indexing'), true);
+  assert.equal(isDocumentIndexing('completed'), false);
+  assert.equal(
+    indexingNotice([{ id: '1', name: 'a.pdf', indexing_status: 'completed', error: null }]),
+    null
+  );
+  assert.match(
+    indexingNotice([{ id: '1', name: 'a.pdf', indexing_status: 'indexing', error: null }]) ??
+      '',
+    /a\.pdf/
+  );
+  assert.equal(
+    syncSummaryLabel({ ready: 1, indexing: 2, error: 0, total: 3 }),
+    'Listo 1 · Indexando 2 · Error 0 (total 3).'
+  );
 });
 
 function memoryDoc(): PageDoc {

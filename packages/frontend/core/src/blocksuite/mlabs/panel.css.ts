@@ -26,6 +26,17 @@ export const error = style({
   background: cssVarV2('layer/background/error'),
 });
 
+export const notice = style({
+  margin: 0,
+  padding: '8px 10px',
+  borderRadius: 8,
+  fontSize: 13,
+  lineHeight: '20px',
+  color: cssVarV2('text/primary'),
+  background: cssVarV2('layer/background/secondary'),
+  boxShadow: `inset 0 0 0 1px ${cssVarV2('layer/insideBorder/border')}`,
+});
+
 export const section = style({
   display: 'flex',
   flexDirection: 'column',

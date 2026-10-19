@@ -101,6 +101,29 @@ export function statusLabel(status: string): string {
   return labels[status] ?? status;
 }
 
+/** True while Dify has not finished indexing (or failed). */
+export function isDocumentIndexing(status: string): boolean {
+  return status !== 'completed' && status !== 'error';
+}
+
+export function indexingNotice(documents: SourceDocument[]): string | null {
+  const pending = documents.filter(doc => isDocumentIndexing(doc.indexing_status));
+  if (pending.length === 0) return null;
+  if (pending.length === 1) {
+    return `“${pending[0].name}” todavía se indexa. Esperá a Listo para que Preguntar lo use entero.`;
+  }
+  return `${pending.length} archivos todavía se indexan. Esperá a Listo para que Preguntar los use enteros.`;
+}
+
+export function syncSummaryLabel(summary: {
+  ready: number;
+  indexing: number;
+  error: number;
+  total: number;
+}): string {
+  return `Listo ${summary.ready} · Indexando ${summary.indexing} · Error ${summary.error} (total ${summary.total}).`;
+}
+
 export function humanBridgeError(code: string, detail?: string): string {
   const messages: Record<string, string> = {
     bad_request:

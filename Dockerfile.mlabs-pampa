@@ -1,0 +1,9 @@
+# Layer the patched web client onto the pinned stock self-host image.
+# Backend Enterprise binary stays untouched.
+ARG BASE=ghcr.io/toeverything/affine@sha256:c312116a134184947d98749c8a8e29f4e3bc97f4f2a51c9a3497f9baea2eec2b
+FROM ${BASE}
+ARG REVISION=ml-dify-panel
+LABEL org.opencontainers.image.source="https://github.com/manticore-labs/mlabs-affine"
+LABEL org.opencontainers.image.revision="${REVISION}"
+RUN find /app/static -mindepth 1 -maxdepth 1 ! -name admin ! -name mobile -exec rm -rf {} +
+COPY packages/frontend/apps/web/dist/ /app/static/

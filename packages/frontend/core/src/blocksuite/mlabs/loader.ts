@@ -9,7 +9,7 @@ const extra: MlabsCommandSpec[] = [];
 const builtins: MlabsCommandSpec[] = [
   {
     name: 'dify-sources',
-    description: 'Create the Dify dataset for this page',
+    description: 'Abrir el panel de fuentes Dify de esta página',
     endpoint: '/mlabs/dify-sources',
   },
 ];

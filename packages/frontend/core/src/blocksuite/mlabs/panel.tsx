@@ -232,7 +232,7 @@ export async function paintPeople(
       strokeStyle: shape.strokeStyle,
       shapeStyle: 'General',
       shapeType: 'rect',
-      text: shape.name,
+      text: shape.text || shape.name,
     });
     idByExternal.set(shape.externalId, id);
     const model = surface.getElementById?.(id);
@@ -309,6 +309,16 @@ export function DifySourcesPanel({
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<string | null>(null);
   const [askSources, setAskSources] = useState<AskSource[]>([]);
+  const [feedbackNodes, setFeedbackNodes] = useState<
+    Array<{
+      externalId: string;
+      kind: string;
+      label: string;
+      statement: string;
+    }>
+  >([]);
+  const [feedbackPick, setFeedbackPick] = useState('');
+  const [feedbackNote, setFeedbackNote] = useState('');
 
   const remember = useCallback(
     (id: string) => {
@@ -767,10 +777,10 @@ export function DifySourcesPanel({
           <Tabs.Content value="pintar">
             <section className={styles.section}>
               <p className={styles.lead}>
-                Pinta el árbol desde el registry (Z1 equipo/personas +
-                WHY→WHO→HOW→WHAT). Verde = activo/verificado; amarillo punteado
-                = propuesto. A la izquierda de la nota; no toca la nota ni el
-                contrato WHY de la pestaña.
+                Pinta el caso real desde el registry (equipos, roles, personas,
+                jerarquía + WHY→WHO→HOW→WHAT con textos). Verde = activo; azul =
+                rol; amarillo = propuesto. Luego podés mandar un nodo a Dify
+                (doc en el dataset de esta página).
               </p>
               <div className={styles.actions}>
                 <Button
@@ -779,7 +789,35 @@ export function DifySourcesPanel({
                   loading={actionBusy}
                   onClick={() =>
                     void run('No pude pintar el lienzo.', async () => {
+                      const tree = await fetchRegistryTree(fetchImpl);
                       const count = await paintPeople(store, fetchImpl);
+                      const nodes: Array<{
+                        externalId: string;
+                        kind: string;
+                        label: string;
+                        statement: string;
+                      }> = [];
+                      for (const a of tree?.actors ?? []) {
+                        if (a.external_id.includes('smoke')) continue;
+                        nodes.push({
+                          externalId: a.external_id.replace(/^mlabs:/, ''),
+                          kind: a.kind,
+                          label: a.name,
+                          statement: '',
+                        });
+                      }
+                      for (const art of tree?.artifacts ?? []) {
+                        nodes.push({
+                          externalId: art.external_id,
+                          kind: art.kind,
+                          label: art.body?.label || art.kind.toUpperCase(),
+                          statement: String(art.body?.statement ?? ''),
+                        });
+                      }
+                      setFeedbackNodes(nodes);
+                      if (nodes[0] && !feedbackPick) {
+                        setFeedbackPick(nodes[0].externalId);
+                      }
                       notify.success({
                         title: 'Mlabs Framework',
                         message: `Pintados ${count} nodos del árbol.`,
@@ -788,6 +826,92 @@ export function DifySourcesPanel({
                   }
                 >
                   Pintar
+                </Button>
+              </div>
+              <p className={styles.lead}>
+                Enviar a Dify (S3): elige el nodo (WHY/WHO/equipo/…) y opcional
+                una nota. Crea/actualiza un .md en Fuentes.
+              </p>
+              <label className={styles.field}>
+                <span>Nodo</span>
+                <select
+                  className={styles.textarea}
+                  value={feedbackPick}
+                  disabled={actionBusy || feedbackNodes.length === 0}
+                  onChange={event => setFeedbackPick(event.target.value)}
+                >
+                  {feedbackNodes.length === 0 ? (
+                    <option value="">Primero pintá el árbol</option>
+                  ) : (
+                    feedbackNodes.map(node => (
+                      <option key={node.externalId} value={node.externalId}>
+                        [{node.kind}] {node.label}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+              <label className={styles.field}>
+                <span>Nota (opcional)</span>
+                <textarea
+                  className={styles.textarea}
+                  value={feedbackNote}
+                  onChange={event => setFeedbackNote(event.target.value)}
+                  disabled={actionBusy}
+                  rows={3}
+                  placeholder="Contexto para RAG / HITL…"
+                />
+              </label>
+              <div className={styles.actions}>
+                <Button
+                  variant="primary"
+                  disabled={
+                    !ready ||
+                    actionBusy ||
+                    !feedbackPick ||
+                    feedbackNodes.length === 0
+                  }
+                  loading={actionBusy}
+                  onClick={() =>
+                    void run('No pude enviar el feedback a Dify.', async () => {
+                      if (!datasetId) return;
+                      const node = feedbackNodes.find(
+                        n => n.externalId === feedbackPick
+                      );
+                      if (!node) throw new Error('Elegí un nodo del árbol.');
+                      const response = await fetchImpl(
+                        `${FRAMEWORK}/feedback`,
+                        {
+                          method: 'POST',
+                          headers: { 'content-type': 'application/json' },
+                          body: JSON.stringify({
+                            dataset_id: datasetId,
+                            page_id: pageId,
+                            external_id: node.externalId,
+                            kind: node.kind,
+                            label: node.label,
+                            statement: node.statement,
+                            note: feedbackNote.trim(),
+                            engagement_id: 'poc-s1',
+                            request_id: crypto.randomUUID(),
+                          }),
+                        }
+                      );
+                      if (!response.ok) {
+                        throw new Error(await readBridgeError(response));
+                      }
+                      const body = (await response.json()) as {
+                        document?: { name?: string };
+                      };
+                      notify.success({
+                        title: 'Mlabs Framework',
+                        message: `Enviado a Dify: ${body.document?.name ?? node.label}`,
+                      });
+                      setFeedbackNote('');
+                    })
+                  }
+                >
+                  Enviar a Dify
                 </Button>
               </div>
             </section>

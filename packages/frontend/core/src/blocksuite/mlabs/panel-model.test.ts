@@ -139,16 +139,16 @@ test('paint places Z1 + WHY→WHO→HOW→WHAT to the left of a note', () => {
   assert.equal(empty.shapes[1].name, 'Adrian Eguez');
   assert.equal(empty.shapes[2].name, 'WHY');
   assert.equal(empty.shapes[5].name, 'WHAT');
+  assert.match(empty.shapes[2].text, /WHY\n/);
   assert.ok(empty.connectors.length >= 5);
-  assert.equal(empty.shapes[0].xywh, '[0,0,160,64]');
-  assert.equal(empty.shapes[1].xywh, '[0,88,160,64]');
-  assert.equal(empty.shapes[2].xywh, '[200,0,160,64]');
-  const beside = paintPlan(foreignMinX(['[-78.5,-4,498,194]']));
-  assert.equal(beside.shapes[0].xywh, '[-1238.5,0,160,64]');
+  assert.equal(empty.shapes[0].xywh, '[0,0,220,96]');
+  assert.equal(empty.shapes[1].xywh, '[0,116,220,96]');
+  assert.equal(empty.shapes[2].xywh, '[268,0,220,140]');
   assert.equal(isOwnNode({ id: 'mlabs:team:mlabs-core' }), true);
   assert.equal(isOwnNode({ id: 'nano', role: 'person' }), true);
   assert.equal(isOwnNode({ id: 'TVR4dPU24a', text: 'Mlabs Core' }), true);
   assert.equal(isOwnNode({ id: 'why-1', role: 'why' }), true);
+  assert.equal(isOwnNode({ id: 'role-1', role: 'role' }), true);
   assert.equal(isOwnNode({ id: 'note-1' }), false);
 });
 

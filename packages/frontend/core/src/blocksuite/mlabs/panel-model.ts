@@ -240,11 +240,12 @@ export function changeLabel(change: SourceDocument['change']): string {
   return '';
 }
 
-export const SHAPE_W = 160;
-export const SHAPE_H = 64;
-export const SHAPE_GAP_Y = 24;
-export const SHAPE_GAP_X = 200;
-export const COL_GAP = 40;
+export const SHAPE_W = 220;
+export const SHAPE_H = 96;
+export const SHAPE_H_Z3 = 140;
+export const SHAPE_GAP_Y = 20;
+export const SHAPE_GAP_X = 160;
+export const COL_GAP = 48;
 /** Full impact-map width left of the note: Z1 + WHY→WHO→HOW→WHAT */
 export const TREE_COLS = 5;
 
@@ -255,12 +256,21 @@ export type CanvasNode = {
   text?: string;
 };
 
-export type PaintRole = 'team' | 'person' | 'why' | 'who' | 'how' | 'what';
+export type PaintRole =
+  | 'team'
+  | 'person'
+  | 'role'
+  | 'why'
+  | 'who'
+  | 'how'
+  | 'what';
 
 export type PaintShape = {
   role: PaintRole;
   externalId: string;
   name: string;
+  /** Shown on the canvas (label + statement). */
+  text: string;
   xywh: string;
   fillColor: string;
   strokeStyle: 'solid' | 'dash';
@@ -279,6 +289,7 @@ export type PaintPlan = {
 
 export type RegistryTree = {
   actors?: Array<{
+    id?: string;
     external_id: string;
     kind: string;
     name: string;
@@ -300,12 +311,25 @@ export type RegistryTree = {
 
 const COLOR_OK = '#3cbc36';
 const COLOR_PROPOSED = '#e6b422';
+const COLOR_ROLE = '#5b8def';
+
+export function shapeCaption(label: string, statement?: string): string {
+  const body = (statement ?? '').trim();
+  if (!body) return label;
+  const clipped = body.length > 110 ? `${body.slice(0, 107)}…` : body;
+  return `${label}\n${clipped}`;
+}
+
+function shortId(externalId: string): string {
+  return externalId.replace(/^mlabs:/, '') || externalId;
+}
 
 const FALLBACK_Z1: Array<Omit<PaintShape, 'xywh'>> = [
   {
     role: 'team',
     externalId: 'mlabs-core',
     name: 'Mlabs Core',
+    text: 'Mlabs Core',
     fillColor: COLOR_OK,
     strokeStyle: 'solid',
     attrs: {
@@ -319,6 +343,7 @@ const FALLBACK_Z1: Array<Omit<PaintShape, 'xywh'>> = [
     role: 'person',
     externalId: 'adrian-eguez',
     name: 'Adrian Eguez',
+    text: 'Adrian Eguez\nOwner',
     fillColor: COLOR_OK,
     strokeStyle: 'solid',
     attrs: {
@@ -336,39 +361,50 @@ const FALLBACK_Z3: Array<Omit<PaintShape, 'xywh'>> = [
     role: 'why',
     externalId: 'why-poc',
     name: 'WHY',
+    text: shapeCaption(
+      'WHY',
+      'Bajar el tiempo de decisión del framework Mlabs con un master registry trazable.'
+    ),
     fillColor: COLOR_PROPOSED,
     strokeStyle: 'dash',
-    attrs: { statement: 'Objetivo de negocio (KPI)' },
+    attrs: {
+      statement:
+        'Bajar el tiempo de decisión del framework Mlabs con un master registry trazable.',
+    },
   },
   {
     role: 'who',
     externalId: 'who-poc',
     name: 'WHO',
+    text: shapeCaption('WHO', 'Adrian · Mac Adrian · Infra · equipos Mlabs'),
     fillColor: COLOR_PROPOSED,
     strokeStyle: 'dash',
-    attrs: { statement: 'Actores que mueven el KPI' },
+    attrs: { statement: 'Adrian · Mac Adrian · Infra · equipos Mlabs' },
   },
   {
     role: 'how',
     externalId: 'how-poc',
     name: 'HOW',
+    text: shapeCaption('HOW', 'PG mlabs + bridge + Pintar←SoT + feedback Dify'),
     fillColor: COLOR_PROPOSED,
     strokeStyle: 'dash',
-    attrs: { statement: 'Capacidades / cambios' },
+    attrs: { statement: 'PG mlabs + bridge + Pintar←SoT + feedback Dify' },
   },
   {
     role: 'what',
     externalId: 'what-poc',
     name: 'WHAT',
+    text: shapeCaption('WHAT', 'Árbol real en lienzo + feedback nodo→Dify'),
     fillColor: COLOR_PROPOSED,
     strokeStyle: 'dash',
-    attrs: { statement: 'Entregables / features' },
+    attrs: { statement: 'Árbol real en lienzo + feedback nodo→Dify' },
   },
 ];
 
 const OWN_ROLES = new Set<string>([
   'person',
   'team',
+  'role',
   'why',
   'who',
   'how',
@@ -429,11 +465,12 @@ function place(
   row: Omit<PaintShape, 'xywh'>,
   col: number,
   rowIndex: number,
-  originX: number
+  originX: number,
+  height = SHAPE_H
 ): PaintShape {
   const x = originX + col * (SHAPE_W + COL_GAP);
-  const y = rowIndex * (SHAPE_H + SHAPE_GAP_Y);
-  return { ...row, xywh: `[${x},${y},${SHAPE_W},${SHAPE_H}]` };
+  const y = rowIndex * (height + SHAPE_GAP_Y);
+  return { ...row, xywh: `[${x},${y},${SHAPE_W},${height}]` };
 }
 
 /** Default full tree (Z1 + impact map) — also fallback if registry unavailable. */
@@ -447,23 +484,48 @@ export function paintPlanFromTree(
 ): PaintPlan {
   const originX = treeOriginX(foreignLeft);
   const z1: Array<Omit<PaintShape, 'xywh'>> = [];
-  if (tree?.actors?.length) {
-    for (const actor of tree.actors) {
-      if (actor.kind !== 'team' && actor.kind !== 'person') continue;
-      if (actor.external_id.includes('smoke')) continue;
-      const short =
-        actor.external_id.replace(/^mlabs:/, '') || actor.external_id;
+  const actors = (tree?.actors ?? []).filter(
+    a => !a.external_id.includes('smoke')
+  );
+
+  if (actors.length) {
+    const kindRank = (k: string) =>
+      k === 'team' ? 0 : k === 'role' ? 1 : k === 'person' ? 2 : 3;
+    const ordered = [...actors].sort(
+      (a, b) =>
+        kindRank(a.kind) - kindRank(b.kind) ||
+        a.name.localeCompare(b.name, 'es')
+    );
+    for (const actor of ordered) {
+      if (
+        actor.kind !== 'team' &&
+        actor.kind !== 'person' &&
+        actor.kind !== 'role'
+      ) {
+        continue;
+      }
+      const short = shortId(actor.external_id);
+      const roleLabel =
+        actor.kind === 'role' ? `Rol: ${actor.name}` : actor.name;
+      const active = actor.status === 'active';
       z1.push({
-        role: actor.kind,
+        role: actor.kind as PaintRole,
         externalId: short,
         name: actor.name,
-        fillColor: actor.status === 'active' ? COLOR_OK : COLOR_PROPOSED,
-        strokeStyle: actor.status === 'active' ? 'solid' : 'dash',
+        text: roleLabel,
+        fillColor:
+          actor.kind === 'role'
+            ? COLOR_ROLE
+            : active
+              ? COLOR_OK
+              : COLOR_PROPOSED,
+        strokeStyle: active ? 'solid' : 'dash',
         attrs: {
           email: String(actor.attrs?.email ?? ''),
           affine_user_id: String(actor.attrs?.affine_user_id ?? ''),
           plane_user_id: String(actor.attrs?.plane_user_id ?? ''),
           buzz_pubkey: String(actor.attrs?.buzz_pubkey ?? ''),
+          actor_kind: actor.kind,
         },
       });
     }
@@ -477,22 +539,24 @@ export function paintPlanFromTree(
       const art = tree.artifacts.find(a => a.kind === kind);
       if (!art) continue;
       const label = art.body?.label || kind.toUpperCase();
+      const statement = String(art.body?.statement ?? '');
       const verified = art.verification === 'verified';
       z3.push({
         role: kind,
         externalId: art.external_id,
         name: label,
+        text: shapeCaption(label, statement),
         fillColor: verified ? COLOR_OK : COLOR_PROPOSED,
         strokeStyle: verified ? 'solid' : 'dash',
-        attrs: { statement: String(art.body?.statement ?? '') },
+        attrs: { statement },
       });
     }
   }
   if (z3.length === 0) z3.push(...FALLBACK_Z3);
 
   const shapes: PaintShape[] = [
-    ...z1.map((row, i) => place(row, 0, i, originX)),
-    ...z3.map((row, i) => place(row, i + 1, 0, originX)),
+    ...z1.map((row, i) => place(row, 0, i, originX, SHAPE_H)),
+    ...z3.map((row, i) => place(row, i + 1, 0, originX, SHAPE_H_Z3)),
   ];
 
   const connectors: PaintConnector[] = [];
@@ -502,9 +566,26 @@ export function paintPlanFromTree(
       toExternalId: z3[i + 1].externalId,
     });
   }
+
+  // Hierarchy edges from registry (member_of / part_of / plays_role / reports_to)
+  if (tree?.edges?.length && actors.length) {
+    const byUuid = new Map(
+      actors.filter(a => a.id).map(a => [String(a.id), shortId(a.external_id)])
+    );
+    for (const edge of tree.edges) {
+      const from = edge.from_id ? byUuid.get(String(edge.from_id)) : undefined;
+      const to = edge.to_id ? byUuid.get(String(edge.to_id)) : undefined;
+      if (!from || !to) continue;
+      connectors.push({ fromExternalId: from, toExternalId: to });
+    }
+  }
+
+  // People/teams → WHO (impact map)
   const who = z3.find(s => s.role === 'who');
   if (who) {
-    for (const actor of z1) {
+    for (const actor of z1.filter(
+      a => a.role === 'person' || a.role === 'team'
+    )) {
       connectors.push({
         fromExternalId: actor.externalId,
         toExternalId: who.externalId,
@@ -512,9 +593,9 @@ export function paintPlanFromTree(
     }
   }
 
-  // Register labels for isOwnNode after dynamic names
   for (const s of shapes) {
     OWN_TEXT.add(s.name);
+    OWN_TEXT.add(s.text);
     OWN_EXTERNAL.add(s.externalId);
   }
 

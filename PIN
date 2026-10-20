@@ -1,5 +1,5 @@
 0.27.4
 b4c8548c09da21b2898443559a5b846f0ccf5dd8
-client 1c8b5a251c907635265d4e286b6b5613e1a13b23
-image manticore-labs/affine-pampa:1c8b5a2
-image_id sha256:bb7dc19dae59c972331f72025818a9b89023b35679d6bf5c690da9a026ef3be3
+client a062fed
+image manticore-labs/affine-pampa:a062fed
+image_id sha256:c55251ef05b1015bc96c0a3c298b9cb14b7c614bddc9d517c9c3f3d50d54625f

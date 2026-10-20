@@ -13,7 +13,14 @@ const FRAMEWORK_ENDPOINT = '/mlabs/framework';
 const builtins: MlabsCommandSpec[] = [
   {
     name: 'mlabs-framework',
-    description: 'Fuentes y preguntas sobre el dataset de esta página',
+    description: 'Fuentes, Pintar y preguntas sobre el dataset de esta página',
+    endpoint: FRAMEWORK_ENDPOINT,
+    showInSlashMenu: true,
+  },
+  {
+    name: '💬 Comentario Mlabs',
+    description:
+      'Enviar comentario / feedback de un nodo del árbol a Dify (RAG)',
     endpoint: FRAMEWORK_ENDPOINT,
     showInSlashMenu: true,
   },

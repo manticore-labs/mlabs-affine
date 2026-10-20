@@ -240,14 +240,17 @@ export function changeLabel(change: SourceDocument['change']): string {
   return '';
 }
 
-export const SHAPE_W = 220;
-export const SHAPE_H = 96;
-export const SHAPE_H_Z3 = 140;
-export const SHAPE_GAP_Y = 20;
-export const SHAPE_GAP_X = 160;
-export const COL_GAP = 48;
-/** Full impact-map width left of the note: Z1 + WHY→WHO→HOW→WHAT */
-export const TREE_COLS = 5;
+export const SHAPE_W = 200;
+export const MEMBER_W = 260;
+export const MEMBER_H = 128;
+export const TEAM_W = 150;
+export const LANE_CHILD_W = 200;
+export const LANE_CHILD_H = 110;
+export const TITLE_H = 44;
+export const SHAPE_GAP_Y = 16;
+export const SHAPE_GAP_X = 24;
+export const SECTION_GAP = 48;
+export const COL_GAP = 24;
 
 export type CanvasNode = {
   id: string;
@@ -257,19 +260,20 @@ export type CanvasNode = {
 };
 
 export type PaintRole =
+  | 'title'
   | 'team'
   | 'person'
   | 'role'
   | 'why'
   | 'who'
   | 'how'
-  | 'what';
+  | 'what'
+  | 'question';
 
 export type PaintShape = {
   role: PaintRole;
   externalId: string;
   name: string;
-  /** Shown on the canvas (label + statement). */
   text: string;
   xywh: string;
   fillColor: string;
@@ -297,9 +301,16 @@ export type RegistryTree = {
     attrs?: Record<string, unknown>;
   }>;
   artifacts?: Array<{
+    id?: string;
     external_id: string;
     kind: string;
-    body?: { label?: string; statement?: string };
+    parent_id?: string | null;
+    body?: {
+      label?: string;
+      statement?: string;
+      needs_human?: boolean;
+      question?: string;
+    };
     verification?: string;
   }>;
   edges?: Array<{
@@ -311,12 +322,14 @@ export type RegistryTree = {
 
 const COLOR_OK = '#3cbc36';
 const COLOR_PROPOSED = '#e6b422';
-const COLOR_ROLE = '#5b8def';
+const COLOR_TITLE = '#2a2a2a';
+const COLOR_TEAM = '#1f6f4a';
+const COLOR_Q = '#c45c26';
 
 export function shapeCaption(label: string, statement?: string): string {
   const body = (statement ?? '').trim();
   if (!body) return label;
-  const clipped = body.length > 110 ? `${body.slice(0, 107)}…` : body;
+  const clipped = body.length > 120 ? `${body.slice(0, 117)}…` : body;
   return `${label}\n${clipped}`;
 }
 
@@ -324,84 +337,40 @@ function shortId(externalId: string): string {
   return externalId.replace(/^mlabs:/, '') || externalId;
 }
 
-const FALLBACK_Z1: Array<Omit<PaintShape, 'xywh'>> = [
-  {
-    role: 'team',
-    externalId: 'mlabs-core',
-    name: 'Mlabs Core',
-    text: 'Mlabs Core',
-    fillColor: COLOR_OK,
-    strokeStyle: 'solid',
-    attrs: {
-      email: '',
-      affine_user_id: '',
-      plane_user_id: '',
-      buzz_pubkey: '',
-    },
-  },
-  {
-    role: 'person',
-    externalId: 'adrian-eguez',
-    name: 'Adrian Eguez',
-    text: 'Adrian Eguez\nOwner',
-    fillColor: COLOR_OK,
-    strokeStyle: 'solid',
-    attrs: {
-      email: '',
-      affine_user_id: '58eefc79-b154-4202-a83c-9cfe6930c165',
-      plane_user_id: '',
-      buzz_pubkey:
-        '1aab62cb42ea5682d5a7dd4b221d9b75f002acc531f2464d35c044e394122f3e',
-    },
-  },
-];
+function attrStr(
+  attrs: Record<string, unknown> | undefined,
+  key: string
+): string {
+  const v = attrs?.[key];
+  return typeof v === 'string' && v.trim() ? v.trim() : '';
+}
 
-const FALLBACK_Z3: Array<Omit<PaintShape, 'xywh'>> = [
-  {
-    role: 'why',
-    externalId: 'why-poc',
-    name: 'WHY',
-    text: shapeCaption(
-      'WHY',
-      'Bajar el tiempo de decisión del framework Mlabs con un master registry trazable.'
-    ),
-    fillColor: COLOR_PROPOSED,
-    strokeStyle: 'dash',
-    attrs: {
-      statement:
-        'Bajar el tiempo de decisión del framework Mlabs con un master registry trazable.',
-    },
-  },
-  {
-    role: 'who',
-    externalId: 'who-poc',
-    name: 'WHO',
-    text: shapeCaption('WHO', 'Adrian · Mac Adrian · Infra · equipos Mlabs'),
-    fillColor: COLOR_PROPOSED,
-    strokeStyle: 'dash',
-    attrs: { statement: 'Adrian · Mac Adrian · Infra · equipos Mlabs' },
-  },
-  {
-    role: 'how',
-    externalId: 'how-poc',
-    name: 'HOW',
-    text: shapeCaption('HOW', 'PG mlabs + bridge + Pintar←SoT + feedback Dify'),
-    fillColor: COLOR_PROPOSED,
-    strokeStyle: 'dash',
-    attrs: { statement: 'PG mlabs + bridge + Pintar←SoT + feedback Dify' },
-  },
-  {
-    role: 'what',
-    externalId: 'what-poc',
-    name: 'WHAT',
-    text: shapeCaption('WHAT', 'Árbol real en lienzo + feedback nodo→Dify'),
-    fillColor: COLOR_PROPOSED,
-    strokeStyle: 'dash',
-    attrs: { statement: 'Árbol real en lienzo + feedback nodo→Dify' },
-  },
-];
+export function personCardText(
+  name: string,
+  attrs: Record<string, unknown> | undefined,
+  roleName?: string
+): string {
+  const title = attrStr(attrs, 'title') || roleName || '';
+  const email = attrStr(attrs, 'email');
+  const affine = attrStr(attrs, 'affine_user_id');
+  const plane = attrStr(attrs, 'plane_user_id');
+  const given = attrStr(attrs, 'given_name');
+  const family = attrStr(attrs, 'family_name');
+  const lines = [
+    name,
+    title ? `Rol: ${title}` : '',
+    given || family
+      ? `Nombre: ${[given, family].filter(Boolean).join(' ')}`
+      : '',
+    email ? `📧 ${email}` : '📧 —',
+    `Affine: ${affine || '—'}`,
+    `Plane: ${plane || '—'}`,
+  ].filter(Boolean);
+  return lines.join('\n');
+}
 
 const OWN_ROLES = new Set<string>([
+  'title',
   'person',
   'team',
   'role',
@@ -409,21 +378,20 @@ const OWN_ROLES = new Set<string>([
   'who',
   'how',
   'what',
+  'question',
+  'connector',
 ]);
-const OWN_TEXT = new Set([...FALLBACK_Z1, ...FALLBACK_Z3].map(row => row.name));
-const OWN_EXTERNAL = new Set(
-  [...FALLBACK_Z1, ...FALLBACK_Z3].map(row => row.externalId)
-);
+const OWN_TEXT = new Set<string>(['EQUIPOS', 'WHY']);
+const OWN_EXTERNAL = new Set<string>(['title-equipos', 'title-why']);
 
 export function isOwnNode(node: CanvasNode): boolean {
   return (
     (typeof node.role === 'string' && OWN_ROLES.has(node.role)) ||
     (typeof node.externalId === 'string' &&
       OWN_EXTERNAL.has(node.externalId)) ||
-    node.id.startsWith('mlabs:person:') ||
-    node.id.startsWith('mlabs:team:') ||
-    node.id.startsWith('mlabs:artifact:') ||
-    (typeof node.text === 'string' && OWN_TEXT.has(node.text))
+    node.id.startsWith('mlabs:') ||
+    (typeof node.text === 'string' &&
+      (OWN_TEXT.has(node.text) || node.text.startsWith('❓')))
   );
 }
 
@@ -449,31 +417,24 @@ export function foreignMinX(xywhs: Array<string | undefined>): number | null {
         xs.push(parsed[0] as number);
       }
     } catch {
-      /* ignore a note the canvas cannot measure */
+      /* ignore */
     }
   }
   if (xs.length === 0) return null;
   return Math.min(...xs);
 }
 
-function treeOriginX(foreignLeft: number | null): number {
-  const width = TREE_COLS * SHAPE_W + (TREE_COLS - 1) * COL_GAP + SHAPE_GAP_X;
-  return foreignLeft == null ? 0 : foreignLeft - width;
-}
-
-function place(
+function box(
   row: Omit<PaintShape, 'xywh'>,
-  col: number,
-  rowIndex: number,
-  originX: number,
-  height = SHAPE_H
+  x: number,
+  y: number,
+  w: number,
+  h: number
 ): PaintShape {
-  const x = originX + col * (SHAPE_W + COL_GAP);
-  const y = rowIndex * (height + SHAPE_GAP_Y);
-  return { ...row, xywh: `[${x},${y},${SHAPE_W},${height}]` };
+  return { ...row, xywh: `[${x},${y},${w},${h}]` };
 }
 
-/** Default full tree (Z1 + impact map) — also fallback if registry unavailable. */
+/** Default / fallback + real tree lane layout. */
 export function paintPlan(foreignLeft: number | null): PaintPlan {
   return paintPlanFromTree(null, foreignLeft);
 }
@@ -482,115 +443,353 @@ export function paintPlanFromTree(
   tree: RegistryTree | null,
   foreignLeft: number | null
 ): PaintPlan {
-  const originX = treeOriginX(foreignLeft);
-  const z1: Array<Omit<PaintShape, 'xywh'>> = [];
+  const originX = foreignLeft == null ? 0 : foreignLeft - 980;
+  const shapes: PaintShape[] = [];
+  const connectors: PaintConnector[] = [];
+  let y = 0;
+
   const actors = (tree?.actors ?? []).filter(
     a => !a.external_id.includes('smoke')
   );
+  const edges = tree?.edges ?? [];
+  const artifacts = (tree?.artifacts ?? []).filter(Boolean);
+  const byUuid = new Map(actors.filter(a => a.id).map(a => [String(a.id), a]));
 
-  if (actors.length) {
-    const kindRank = (k: string) =>
-      k === 'team' ? 0 : k === 'role' ? 1 : k === 'person' ? 2 : 3;
-    const ordered = [...actors].sort(
-      (a, b) =>
-        kindRank(a.kind) - kindRank(b.kind) ||
-        a.name.localeCompare(b.name, 'es')
-    );
-    for (const actor of ordered) {
-      if (
-        actor.kind !== 'team' &&
-        actor.kind !== 'person' &&
-        actor.kind !== 'role'
-      ) {
-        continue;
-      }
-      const short = shortId(actor.external_id);
-      const roleLabel =
-        actor.kind === 'role' ? `Rol: ${actor.name}` : actor.name;
-      const active = actor.status === 'active';
-      z1.push({
-        role: actor.kind as PaintRole,
-        externalId: short,
-        name: actor.name,
-        text: roleLabel,
-        fillColor:
-          actor.kind === 'role'
-            ? COLOR_ROLE
-            : active
-              ? COLOR_OK
-              : COLOR_PROPOSED,
-        strokeStyle: active ? 'solid' : 'dash',
-        attrs: {
-          email: String(actor.attrs?.email ?? ''),
-          affine_user_id: String(actor.attrs?.affine_user_id ?? ''),
-          plane_user_id: String(actor.attrs?.plane_user_id ?? ''),
-          buzz_pubkey: String(actor.attrs?.buzz_pubkey ?? ''),
-          actor_kind: actor.kind,
-        },
-      });
+  const memberOf = new Map<string, string[]>(); // teamExt -> personExt[]
+  const playsRole = new Map<string, string>(); // personExt -> role name
+  const partOf = new Map<string, string>(); // team -> parent team
+  for (const e of edges) {
+    const from = e.from_id ? byUuid.get(String(e.from_id)) : undefined;
+    const to = e.to_id ? byUuid.get(String(e.to_id)) : undefined;
+    if (!from || !to) continue;
+    const fe = shortId(from.external_id);
+    const te = shortId(to.external_id);
+    if (e.rel === 'member_of' && to.kind === 'team' && from.kind === 'person') {
+      const list = memberOf.get(te) ?? [];
+      list.push(fe);
+      memberOf.set(te, list);
+    }
+    if (
+      e.rel === 'plays_role' &&
+      to.kind === 'role' &&
+      from.kind === 'person'
+    ) {
+      playsRole.set(fe, to.name);
+    }
+    if (e.rel === 'part_of' && from.kind === 'team' && to.kind === 'team') {
+      partOf.set(fe, te);
+    }
+    if (e.rel === 'reports_to') {
+      connectors.push({ fromExternalId: fe, toExternalId: te });
     }
   }
-  if (z1.length === 0) z1.push(...FALLBACK_Z1);
 
-  const z3: Array<Omit<PaintShape, 'xywh'>> = [];
-  const kindOrder: PaintRole[] = ['why', 'who', 'how', 'what'];
-  if (tree?.artifacts?.length) {
-    for (const kind of kindOrder) {
-      const art = tree.artifacts.find(a => a.kind === kind);
-      if (!art) continue;
-      const label = art.body?.label || kind.toUpperCase();
-      const statement = String(art.body?.statement ?? '');
-      const verified = art.verification === 'verified';
-      z3.push({
-        role: kind,
-        externalId: art.external_id,
-        name: label,
-        text: shapeCaption(label, statement),
-        fillColor: verified ? COLOR_OK : COLOR_PROPOSED,
-        strokeStyle: verified ? 'solid' : 'dash',
-        attrs: { statement },
-      });
-    }
-  }
-  if (z3.length === 0) z3.push(...FALLBACK_Z3);
-
-  const shapes: PaintShape[] = [
-    ...z1.map((row, i) => place(row, 0, i, originX, SHAPE_H)),
-    ...z3.map((row, i) => place(row, i + 1, 0, originX, SHAPE_H_Z3)),
-  ];
-
-  const connectors: PaintConnector[] = [];
-  for (let i = 0; i < z3.length - 1; i++) {
-    connectors.push({
-      fromExternalId: z3[i].externalId,
-      toExternalId: z3[i + 1].externalId,
+  const teams = actors
+    .filter(a => a.kind === 'team')
+    .sort((a, b) => {
+      const ha = Number(a.attrs?.hierarchy ?? 99);
+      const hb = Number(b.attrs?.hierarchy ?? 99);
+      return ha - hb || a.name.localeCompare(b.name, 'es');
     });
-  }
 
-  // Hierarchy edges from registry (member_of / part_of / plays_role / reports_to)
-  if (tree?.edges?.length && actors.length) {
-    const byUuid = new Map(
-      actors.filter(a => a.id).map(a => [String(a.id), shortId(a.external_id)])
+  // —— EQUIPOS ——
+  shapes.push(
+    box(
+      {
+        role: 'title',
+        externalId: 'title-equipos',
+        name: 'EQUIPOS',
+        text: 'EQUIPOS',
+        fillColor: COLOR_TITLE,
+        strokeStyle: 'solid',
+        attrs: { section: 'equipos' },
+      },
+      originX,
+      y,
+      TEAM_W + SHAPE_GAP_X + MEMBER_W,
+      TITLE_H
+    )
+  );
+  y += TITLE_H + SHAPE_GAP_Y;
+
+  if (teams.length === 0) {
+    // fallback mini lane
+    const teamExt = 'gestion-admin';
+    const people = [
+      {
+        ext: 'adrian-eguez',
+        name: 'Adrian Eguez',
+        attrs: {
+          title: 'CEO',
+          email: 'adrian@manticore-labs.cc',
+          affine_user_id: '58eefc79-b154-4202-a83c-9cfe6930c165',
+        } as Record<string, unknown>,
+      },
+      {
+        ext: 'mac-adrian',
+        name: 'Mac Adrian',
+        attrs: { title: 'CTO', email: 'mac@manticore-labs.cc' } as Record<
+          string,
+          unknown
+        >,
+      },
+    ];
+    const teamH =
+      people.length * MEMBER_H + Math.max(0, people.length - 1) * SHAPE_GAP_Y;
+    shapes.push(
+      box(
+        {
+          role: 'team',
+          externalId: teamExt,
+          name: 'Gestión y Administración',
+          text: 'Gestión y\nAdministración',
+          fillColor: COLOR_TEAM,
+          strokeStyle: 'solid',
+          attrs: {},
+        },
+        originX,
+        y,
+        TEAM_W,
+        teamH
+      )
     );
-    for (const edge of tree.edges) {
-      const from = edge.from_id ? byUuid.get(String(edge.from_id)) : undefined;
-      const to = edge.to_id ? byUuid.get(String(edge.to_id)) : undefined;
-      if (!from || !to) continue;
-      connectors.push({ fromExternalId: from, toExternalId: to });
+    people.forEach((p, i) => {
+      const py = y + i * (MEMBER_H + SHAPE_GAP_Y);
+      shapes.push(
+        box(
+          {
+            role: 'person',
+            externalId: p.ext,
+            name: p.name,
+            text: personCardText(p.name, p.attrs),
+            fillColor: COLOR_OK,
+            strokeStyle: 'solid',
+            attrs: {},
+          },
+          originX + TEAM_W + SHAPE_GAP_X,
+          py,
+          MEMBER_W,
+          MEMBER_H
+        )
+      );
+      connectors.push({ fromExternalId: teamExt, toExternalId: p.ext });
+    });
+    y += teamH + SECTION_GAP;
+  } else {
+    for (const team of teams) {
+      const teamExt = shortId(team.external_id);
+      const memberExts = memberOf.get(teamExt) ?? [];
+      const members = memberExts
+        .map(ext => actors.find(a => shortId(a.external_id) === ext))
+        .filter(Boolean) as NonNullable<(typeof actors)[number]>[];
+      const n = Math.max(1, members.length);
+      const teamH = n * MEMBER_H + (n - 1) * SHAPE_GAP_Y;
+      shapes.push(
+        box(
+          {
+            role: 'team',
+            externalId: teamExt,
+            name: team.name,
+            text: team.name.replace(/ y /g, '\ny '),
+            fillColor: COLOR_TEAM,
+            strokeStyle: 'solid',
+            attrs: { hierarchy: String(team.attrs?.hierarchy ?? '') },
+          },
+          originX,
+          y,
+          TEAM_W,
+          teamH
+        )
+      );
+      if (members.length === 0) {
+        shapes.push(
+          box(
+            {
+              role: 'person',
+              externalId: `${teamExt}-vacant`,
+              name: '(sin miembros)',
+              text: '(sin miembros cargados)',
+              fillColor: COLOR_PROPOSED,
+              strokeStyle: 'dash',
+              attrs: {},
+            },
+            originX + TEAM_W + SHAPE_GAP_X,
+            y,
+            MEMBER_W,
+            MEMBER_H
+          )
+        );
+      } else {
+        members.forEach((person, i) => {
+          const pe = shortId(person.external_id);
+          const py = y + i * (MEMBER_H + SHAPE_GAP_Y);
+          shapes.push(
+            box(
+              {
+                role: 'person',
+                externalId: pe,
+                name: person.name,
+                text: personCardText(
+                  person.name,
+                  person.attrs,
+                  playsRole.get(pe)
+                ),
+                fillColor: COLOR_OK,
+                strokeStyle: 'solid',
+                attrs: {
+                  email: attrStr(person.attrs, 'email'),
+                  affine_user_id: attrStr(person.attrs, 'affine_user_id'),
+                  plane_user_id: attrStr(person.attrs, 'plane_user_id'),
+                  external_id: person.external_id,
+                },
+              },
+              originX + TEAM_W + SHAPE_GAP_X,
+              py,
+              MEMBER_W,
+              MEMBER_H
+            )
+          );
+          connectors.push({ fromExternalId: teamExt, toExternalId: pe });
+        });
+      }
+      y += teamH + SECTION_GAP;
     }
   }
 
-  // People/teams → WHO (impact map)
-  const who = z3.find(s => s.role === 'who');
-  if (who) {
-    for (const actor of z1.filter(
-      a => a.role === 'person' || a.role === 'team'
-    )) {
-      connectors.push({
-        fromExternalId: actor.externalId,
-        toExternalId: who.externalId,
-      });
+  // —— WHY lanes ——
+  shapes.push(
+    box(
+      {
+        role: 'title',
+        externalId: 'title-why',
+        name: 'WHY',
+        text: 'WHY',
+        fillColor: COLOR_TITLE,
+        strokeStyle: 'solid',
+        attrs: { section: 'why' },
+      },
+      originX,
+      y,
+      TEAM_W + SHAPE_GAP_X + LANE_CHILD_W * 3 + COL_GAP * 2,
+      TITLE_H
+    )
+  );
+  y += TITLE_H + SHAPE_GAP_Y;
+
+  const whys = artifacts.filter(a => a.kind === 'why');
+  const byParent = new Map<string, typeof artifacts>();
+  for (const a of artifacts) {
+    if (!a.parent_id) continue;
+    const list = byParent.get(String(a.parent_id)) ?? [];
+    list.push(a);
+    byParent.set(String(a.parent_id), list);
+  }
+
+  const whyList =
+    whys.length > 0
+      ? whys
+      : [
+          {
+            id: 'fallback-why',
+            external_id: 'why-tiempo',
+            kind: 'why',
+            body: {
+              label: 'WHY · Tiempo',
+              statement: 'Reducir tiempo de decisión.',
+              needs_human: true,
+              question: '¿SLA objetivo en horas?',
+            },
+          },
+        ];
+
+  for (const why of whyList) {
+    const whyExt = why.external_id;
+    const children = why.id
+      ? (byParent.get(String(why.id)) ?? [])
+      : artifacts.filter(
+          a =>
+            a.kind !== 'why' &&
+            a.external_id.includes(whyExt.replace('why-', ''))
+        );
+    const ordered = (['who', 'how', 'what'] as const)
+      .map(k => children.find(c => c.kind === k))
+      .filter(Boolean) as typeof artifacts;
+    const needsQ = Boolean(why.body?.needs_human && why.body?.question);
+    const childRows = ordered.length + (needsQ ? 1 : 0);
+    const laneH = Math.max(
+      LANE_CHILD_H,
+      Math.max(1, childRows || 1) * LANE_CHILD_H +
+        Math.max(0, (childRows || 1) - 1) * SHAPE_GAP_Y
+    );
+
+    shapes.push(
+      box(
+        {
+          role: 'why',
+          externalId: whyExt,
+          name: why.body?.label || 'WHY',
+          text: shapeCaption(why.body?.label || 'WHY', why.body?.statement),
+          fillColor: COLOR_PROPOSED,
+          strokeStyle: 'dash',
+          attrs: { statement: String(why.body?.statement ?? '') },
+        },
+        originX,
+        y,
+        TEAM_W + 40,
+        laneH
+      )
+    );
+
+    let cx = originX + TEAM_W + 40 + SHAPE_GAP_X;
+    ordered.forEach((child, i) => {
+      const ce = child.external_id;
+      shapes.push(
+        box(
+          {
+            role: child.kind as PaintRole,
+            externalId: ce,
+            name: child.body?.label || child.kind.toUpperCase(),
+            text: shapeCaption(
+              child.body?.label || child.kind.toUpperCase(),
+              child.body?.statement
+            ),
+            fillColor: COLOR_PROPOSED,
+            strokeStyle: 'dash',
+            attrs: { statement: String(child.body?.statement ?? '') },
+          },
+          cx + i * (LANE_CHILD_W + COL_GAP),
+          y,
+          LANE_CHILD_W,
+          LANE_CHILD_H
+        )
+      );
+      connectors.push({ fromExternalId: whyExt, toExternalId: ce });
+    });
+
+    if (needsQ) {
+      const qExt = `q-${whyExt}`;
+      const qy = y + (ordered.length > 0 ? LANE_CHILD_H + SHAPE_GAP_Y : 0);
+      shapes.push(
+        box(
+          {
+            role: 'question',
+            externalId: qExt,
+            name: 'Pregunta HITL',
+            text: `❓ ${why.body?.question}`,
+            fillColor: COLOR_Q,
+            strokeStyle: 'solid',
+            attrs: { question: String(why.body?.question ?? '') },
+          },
+          cx,
+          qy,
+          LANE_CHILD_W * 2 + COL_GAP,
+          LANE_CHILD_H
+        )
+      );
+      connectors.push({ fromExternalId: whyExt, toExternalId: qExt });
     }
+
+    y += laneH + SECTION_GAP;
   }
 
   for (const s of shapes) {

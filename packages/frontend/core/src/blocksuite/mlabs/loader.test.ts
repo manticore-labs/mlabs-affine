@@ -18,6 +18,14 @@ test('mlabs-framework is the primary builtin command', () => {
   assert.equal(spec.endpoint, '/mlabs/framework');
 });
 
+test('💬 Comentario Mlabs is visible in the slash menu', () => {
+  const spec = mlabsSlashCommands().find(command =>
+    command.name.startsWith('💬')
+  );
+  assert.ok(spec);
+  assert.match(spec.description, /Dify/i);
+});
+
 test('dify-sources stays registered as a hidden alias', () => {
   const spec = mlabsCommands().find(command => command.name === 'dify-sources');
   assert.ok(spec);

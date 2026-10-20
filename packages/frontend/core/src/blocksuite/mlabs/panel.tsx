@@ -82,6 +82,8 @@ export type DifySourcesPanelProps = {
   doc?: PageDoc;
   store?: PaintStore;
   fetchImpl?: FetchLike;
+  initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar';
+  focusFeedback?: boolean;
   onClose: () => void;
 };
 
@@ -91,6 +93,8 @@ export function openDifySourcesPanel(input: {
   doc?: PageDoc;
   store?: PaintStore;
   fetchImpl?: FetchLike;
+  initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar';
+  focusFeedback?: boolean;
 }) {
   const host = globalThis.document?.createElement('div');
   if (!host || !globalThis.document?.body) return;
@@ -109,6 +113,8 @@ export function openDifySourcesPanel(input: {
       doc={input.doc}
       store={input.store}
       fetchImpl={input.fetchImpl}
+      initialTab={input.initialTab}
+      focusFeedback={input.focusFeedback}
       onClose={close}
     />
   );
@@ -287,10 +293,12 @@ export function DifySourcesPanel({
   doc,
   store,
   fetchImpl = globalThis.fetch.bind(globalThis),
+  initialTab = 'fuentes',
+  focusFeedback = false,
   onClose,
 }: DifySourcesPanelProps) {
   const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'why' | 'pintar'>(
-    'fuentes'
+    initialTab
   );
   const [why, setWhy] = useState<WhyDraft>(() => readWhy(doc));
   const [busy, setBusy] = useState(true);
@@ -443,7 +451,7 @@ export function DifySourcesPanel({
               WHY
             </Tabs.Trigger>
             <Tabs.Trigger value="pintar" className={styles.tabTrigger}>
-              Pintar
+              {focusFeedback ? '💬 Pintar' : 'Pintar'}
             </Tabs.Trigger>
           </Tabs.List>
 
@@ -828,9 +836,11 @@ export function DifySourcesPanel({
                   Pintar
                 </Button>
               </div>
-              <p className={styles.lead}>
-                Enviar a Dify (S3): elige el nodo (WHY/WHO/equipo/…) y opcional
-                una nota. Crea/actualiza un .md en Fuentes.
+              <p className={styles.lead} id="mlabs-feedback-anchor">
+                💬 Comentario Mlabs → Dify: elegí nodo (WHY/WHO/persona/…) y
+                opcional una nota. También desde slash{' '}
+                <code>💬 Comentario Mlabs</code> o el botón 💬 del toolbar del
+                lienzo.
               </p>
               <label className={styles.field}>
                 <span>Nodo</span>
@@ -911,7 +921,7 @@ export function DifySourcesPanel({
                     })
                   }
                 >
-                  Enviar a Dify
+                  💬 Enviar comentario a Dify
                 </Button>
               </div>
             </section>

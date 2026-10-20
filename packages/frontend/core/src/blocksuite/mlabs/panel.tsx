@@ -1,27 +1,35 @@
 import { Button, Input, Loading, Modal, notify, Tabs } from '@affine/component';
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import * as Y from 'yjs';
 
 import * as styles from './panel.css';
 import {
+  type CanvasNode,
   changeLabel,
+  foreignMinX,
   humanBridgeError,
   indexingNotice,
+  isOwnNode,
   openRequestBody,
+  type PageDoc,
+  paintPlanFromTree,
   readDatasetId,
   readWhy,
+  type RegistryTree,
+  runOnStore,
+  type SourceDocument,
   statusLabel,
   syncSummaryLabel,
   uploadRejection,
+  type WhyDraft,
   whyRejection,
   writeDatasetId,
   writeWhy,
-  type PageDoc,
-  type SourceDocument,
-  type WhyDraft,
 } from './panel-model';
 
 const FRAMEWORK = '/mlabs/framework';
+const REGISTRY = '/mlabs/registry';
 
 type FetchLike = typeof fetch;
 
@@ -37,10 +45,42 @@ type AskSource = {
   content_preview: string;
 };
 
+type SurfaceElement = {
+  id: string;
+  yMap?: {
+    get: (key: string) => unknown;
+    set: (key: string, value: unknown) => void;
+  };
+  text?: unknown;
+};
+
+type SurfaceModel = {
+  elementModels?: SurfaceElement[];
+  elements?: {
+    getValue?: () => {
+      forEach: (
+        fn: (el: { get?: (key: string) => unknown }, id: string) => void
+      ) => void;
+      delete?: (id: string) => void;
+      has?: (id: string) => boolean;
+    };
+  };
+  hasElementById?: (id: string) => boolean;
+  deleteElement?: (id: string) => void;
+  addElement?: (props: { type: string } & Record<string, unknown>) => string;
+  getElementById?: (id: string) => SurfaceElement | null;
+  store?: { transact?: (fn: () => void) => void };
+};
+
+type PaintStore = {
+  getModelsByFlavour?: (flavour: string) => unknown[];
+};
+
 export type DifySourcesPanelProps = {
   pageId: string;
   pageUrl?: string;
   doc?: PageDoc;
+  store?: PaintStore;
   fetchImpl?: FetchLike;
   onClose: () => void;
 };
@@ -49,6 +89,7 @@ export function openDifySourcesPanel(input: {
   pageId: string;
   pageUrl?: string;
   doc?: PageDoc;
+  store?: PaintStore;
   fetchImpl?: FetchLike;
 }) {
   const host = globalThis.document?.createElement('div');
@@ -66,20 +107,191 @@ export function openDifySourcesPanel(input: {
       pageId={input.pageId}
       pageUrl={input.pageUrl}
       doc={input.doc}
+      store={input.store}
       fetchImpl={input.fetchImpl}
       onClose={close}
     />
   );
 }
 
+function readText(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw;
+  if (
+    raw &&
+    typeof (raw as { toString?: () => string }).toString === 'function'
+  ) {
+    const text = (raw as { toString: () => string }).toString();
+    if (text && text !== '[object Object]') return text;
+  }
+  return undefined;
+}
+
+function readAttrs(raw: unknown): { role?: string; externalId?: string } {
+  if (!raw || typeof raw !== 'object') return {};
+  const map = raw as {
+    get?: (key: string) => unknown;
+    role?: string;
+    externalId?: string;
+  };
+  if (typeof map.get === 'function') {
+    return {
+      role:
+        typeof map.get('role') === 'string'
+          ? (map.get('role') as string)
+          : undefined,
+      externalId:
+        typeof map.get('externalId') === 'string'
+          ? (map.get('externalId') as string)
+          : undefined,
+    };
+  }
+  return {
+    role: typeof map.role === 'string' ? map.role : undefined,
+    externalId: typeof map.externalId === 'string' ? map.externalId : undefined,
+  };
+}
+
+function collectNodes(surface: SurfaceModel): CanvasNode[] {
+  const nodes: CanvasNode[] = [];
+  const seen = new Set<string>();
+  for (const model of surface.elementModels ?? []) {
+    const attrs = readAttrs(model.yMap?.get('mlabsAttrs'));
+    nodes.push({
+      id: model.id,
+      ...attrs,
+      text: readText(model.yMap?.get('text') ?? model.text),
+    });
+    seen.add(model.id);
+  }
+  surface.elements?.getValue?.().forEach((element, id) => {
+    if (seen.has(id)) return;
+    nodes.push({
+      id,
+      ...readAttrs(element.get?.('mlabsAttrs')),
+      text: readText(element.get?.('text')),
+    });
+  });
+  return nodes;
+}
+
+export async function fetchRegistryTree(
+  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis)
+): Promise<RegistryTree | null> {
+  try {
+    const response = await fetchImpl(
+      `${REGISTRY}/tree?engagement_external_id=poc-s1`,
+      {
+        credentials: 'include',
+        cache: 'no-store',
+      }
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as RegistryTree;
+  } catch {
+    return null;
+  }
+}
+
+export async function paintPeople(
+  store: PaintStore | undefined,
+  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis)
+): Promise<number> {
+  const surfaces = (store?.getModelsByFlavour?.('affine:surface') ??
+    []) as Array<SurfaceModel & { xywh?: string }>;
+  if (surfaces.length !== 1 || !surfaces[0].addElement) {
+    throw new Error('Esta página no tiene un lienzo.');
+  }
+  const surface = surfaces[0];
+  const notes = (store?.getModelsByFlavour?.('affine:note') ?? []) as Array<{
+    xywh?: string;
+  }>;
+  const tree = await fetchRegistryTree(fetchImpl);
+  const { shapes, connectors } = paintPlanFromTree(
+    tree,
+    foreignMinX(notes.map(note => note.xywh))
+  );
+  const elements = surface.elements?.getValue?.();
+  for (const node of collectNodes(surface)) {
+    if (!isOwnNode(node) && node.role !== 'connector') continue;
+    if (surface.hasElementById?.(node.id)) surface.deleteElement?.(node.id);
+    if (elements?.has?.(node.id)) {
+      runOnStore(surface.store, () => elements.delete?.(node.id));
+    }
+  }
+
+  const idByExternal = new Map<string, string>();
+  shapes.forEach((shape, index) => {
+    const id = surface.addElement({
+      type: 'shape',
+      index: `a${index}`,
+      xywh: shape.xywh,
+      filled: true,
+      fillColor: shape.fillColor,
+      strokeColor: '#000000',
+      strokeWidth: 4,
+      strokeStyle: shape.strokeStyle,
+      shapeStyle: 'General',
+      shapeType: 'rect',
+      text: shape.name,
+    });
+    idByExternal.set(shape.externalId, id);
+    const model = surface.getElementById?.(id);
+    if (!model?.yMap) {
+      throw new Error('El lienzo creó el shape sin mapa para marcarlo.');
+    }
+    const yMap = model.yMap;
+    runOnStore(surface.store, () => {
+      yMap.set('xywh', shape.xywh);
+      yMap.set('index', `a${index}`);
+      const attrs = new Y.Map<string>();
+      yMap.set('mlabsAttrs', attrs);
+      attrs.set('role', shape.role);
+      attrs.set('externalId', shape.externalId);
+      for (const [key, value] of Object.entries(shape.attrs)) {
+        attrs.set(key, String(value));
+      }
+    });
+  });
+
+  let cIndex = shapes.length;
+  for (const link of connectors) {
+    const sourceId = idByExternal.get(link.fromExternalId);
+    const targetId = idByExternal.get(link.toExternalId);
+    if (!sourceId || !targetId) continue;
+    const id = surface.addElement({
+      type: 'connector',
+      index: `a${cIndex++}`,
+      mode: 0,
+      stroke: '#888888',
+      strokeWidth: 2,
+      source: { id: sourceId },
+      target: { id: targetId },
+    });
+    const model = surface.getElementById?.(id);
+    const connectorMap = model?.yMap;
+    if (connectorMap) {
+      runOnStore(surface.store, () => {
+        const attrs = new Y.Map<string>();
+        connectorMap.set('mlabsAttrs', attrs);
+        attrs.set('role', 'connector');
+        attrs.set('externalId', `${link.fromExternalId}->${link.toExternalId}`);
+      });
+    }
+  }
+  return shapes.length;
+}
+
 export function DifySourcesPanel({
   pageId,
   pageUrl,
   doc,
+  store,
   fetchImpl = globalThis.fetch.bind(globalThis),
   onClose,
 }: DifySourcesPanelProps) {
-  const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'why'>('fuentes');
+  const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'why' | 'pintar'>(
+    'fuentes'
+  );
   const [why, setWhy] = useState<WhyDraft>(() => readWhy(doc));
   const [busy, setBusy] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
@@ -136,7 +348,9 @@ export function DifySourcesPanel({
   }, [datasetId, doc, fetchImpl, pageId, pageUrl, remember]);
 
   useEffect(() => {
-    void load();
+    load().catch(() => {
+      /* load already surfaces errors via notify */
+    });
     // Open once when the panel mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -208,11 +422,18 @@ export function DifySourcesPanel({
             <Tabs.Trigger value="fuentes" className={styles.tabTrigger}>
               Fuentes
             </Tabs.Trigger>
-            <Tabs.Trigger value="preguntar" className={styles.tabTrigger} disabled={!ready}>
+            <Tabs.Trigger
+              value="preguntar"
+              className={styles.tabTrigger}
+              disabled={!ready}
+            >
               Preguntar
             </Tabs.Trigger>
             <Tabs.Trigger value="why" className={styles.tabTrigger}>
               WHY
+            </Tabs.Trigger>
+            <Tabs.Trigger value="pintar" className={styles.tabTrigger}>
+              Pintar
             </Tabs.Trigger>
           </Tabs.List>
 
@@ -299,10 +520,13 @@ export function DifySourcesPanel({
                                 `${FRAMEWORK}/documents/file?dataset_id=${encodeURIComponent(datasetId ?? '')}&document_id=${encodeURIComponent(item.id)}`
                               );
                               if (!response.ok) {
-                                throw new Error(await readBridgeError(response));
+                                throw new Error(
+                                  await readBridgeError(response)
+                                );
                               }
                               const blob = await response.blob();
-                              const link = globalThis.document.createElement('a');
+                              const link =
+                                globalThis.document.createElement('a');
                               link.href = URL.createObjectURL(blob);
                               link.download = item.name;
                               link.click();
@@ -395,15 +619,18 @@ export function DifySourcesPanel({
                       }
                       const rejection = uploadRejection(file.name, file.size);
                       if (rejection) throw new Error(rejection);
-                      const response = await fetchImpl(`${FRAMEWORK}/documents`, {
-                        method: 'POST',
-                        headers: {
-                          'content-type': 'application/octet-stream',
-                          'x-mlabs-dataset-id': datasetId,
-                          'x-mlabs-file-name': encodeURIComponent(file.name),
-                        },
-                        body: file,
-                      });
+                      const response = await fetchImpl(
+                        `${FRAMEWORK}/documents`,
+                        {
+                          method: 'POST',
+                          headers: {
+                            'content-type': 'application/octet-stream',
+                            'x-mlabs-dataset-id': datasetId,
+                            'x-mlabs-file-name': encodeURIComponent(file.name),
+                          },
+                          body: file,
+                        }
+                      );
                       if (!response.ok) {
                         throw new Error(await readBridgeError(response));
                       }
@@ -420,7 +647,8 @@ export function DifySourcesPanel({
                 </Button>
               </div>
               <p className={styles.lead}>
-                pdf, md, txt, docx y similares. Hasta 15 MB. Mismo nombre = reemplazo.
+                pdf, md, txt, docx y similares. Hasta 15 MB. Mismo nombre =
+                reemplazo.
               </p>
             </section>
           </Tabs.Content>
@@ -440,7 +668,10 @@ export function DifySourcesPanel({
                   maxLength={400}
                   disabled={!doc || actionBusy}
                   onChange={event =>
-                    setWhy(current => ({ ...current, statement: event.target.value }))
+                    setWhy(current => ({
+                      ...current,
+                      statement: event.target.value,
+                    }))
                   }
                 />
               </label>
@@ -452,7 +683,10 @@ export function DifySourcesPanel({
                   onChange={event =>
                     setWhy(current => ({
                       ...current,
-                      indicator_type: event.target.value === 'lagging' ? 'lagging' : 'leading',
+                      indicator_type:
+                        event.target.value === 'lagging'
+                          ? 'lagging'
+                          : 'leading',
                     }))
                   }
                 >
@@ -465,7 +699,9 @@ export function DifySourcesPanel({
                 <Input
                   value={why.from}
                   disabled={!doc || actionBusy}
-                  onChange={value => setWhy(current => ({ ...current, from: value }))}
+                  onChange={value =>
+                    setWhy(current => ({ ...current, from: value }))
+                  }
                 />
               </label>
               <label className={styles.field}>
@@ -473,7 +709,9 @@ export function DifySourcesPanel({
                 <Input
                   value={why.to}
                   disabled={!doc || actionBusy}
-                  onChange={value => setWhy(current => ({ ...current, to: value }))}
+                  onChange={value =>
+                    setWhy(current => ({ ...current, to: value }))
+                  }
                 />
               </label>
               <label className={styles.field}>
@@ -482,7 +720,9 @@ export function DifySourcesPanel({
                   value={why.unit}
                   maxLength={40}
                   disabled={!doc || actionBusy}
-                  onChange={value => setWhy(current => ({ ...current, unit: value }))}
+                  onChange={value =>
+                    setWhy(current => ({ ...current, unit: value }))
+                  }
                 />
               </label>
               <label className={styles.field}>
@@ -503,7 +743,10 @@ export function DifySourcesPanel({
                   onClick={() => {
                     const problem = whyRejection(why);
                     if (problem) {
-                      notify.error({ title: 'Mlabs Framework', message: problem });
+                      notify.error({
+                        title: 'Mlabs Framework',
+                        message: problem,
+                      });
                       return;
                     }
                     if (!doc) return;
@@ -521,11 +764,40 @@ export function DifySourcesPanel({
             </section>
           </Tabs.Content>
 
+          <Tabs.Content value="pintar">
+            <section className={styles.section}>
+              <p className={styles.lead}>
+                Pinta el árbol desde el registry (Z1 equipo/personas +
+                WHY→WHO→HOW→WHAT). Verde = activo/verificado; amarillo punteado
+                = propuesto. A la izquierda de la nota; no toca la nota ni el
+                contrato WHY de la pestaña.
+              </p>
+              <div className={styles.actions}>
+                <Button
+                  variant="primary"
+                  disabled={actionBusy}
+                  loading={actionBusy}
+                  onClick={() =>
+                    void run('No pude pintar el lienzo.', async () => {
+                      const count = await paintPeople(store, fetchImpl);
+                      notify.success({
+                        title: 'Mlabs Framework',
+                        message: `Pintados ${count} nodos del árbol.`,
+                      });
+                    })
+                  }
+                >
+                  Pintar
+                </Button>
+              </div>
+            </section>
+          </Tabs.Content>
+
           <Tabs.Content value="preguntar">
             <section className={styles.section}>
               <p className={styles.lead}>
-                La respuesta usa fragmentos recuperados del dataset vía Dify y FreeLLMAPI en el
-                servidor.
+                La respuesta usa fragmentos recuperados del dataset vía Dify y
+                FreeLLMAPI en el servidor.
               </p>
               {askIndexingHint ? (
                 <p className={styles.notice}>{askIndexingHint}</p>
@@ -544,7 +816,9 @@ export function DifySourcesPanel({
               <div className={styles.actions}>
                 <Button
                   variant="primary"
-                  disabled={!ready || actionBusy || question.trim().length === 0}
+                  disabled={
+                    !ready || actionBusy || question.trim().length === 0
+                  }
                   loading={actionBusy}
                   onClick={() =>
                     void run('No pude obtener la respuesta.', async () => {
@@ -581,10 +855,17 @@ export function DifySourcesPanel({
                       <h3 className={styles.sectionTitle}>Fragmentos usados</h3>
                       <ul className={styles.list}>
                         {askSources.map((source, index) => (
-                          <li key={`${source.document_name}-${index}`} className={styles.item}>
+                          <li
+                            key={`${source.document_name}-${index}`}
+                            className={styles.item}
+                          >
                             <div className={styles.itemMeta}>
-                              <span className={styles.itemName}>{source.document_name}</span>
-                              <span className={styles.itemStatus}>{source.content_preview}</span>
+                              <span className={styles.itemName}>
+                                {source.document_name}
+                              </span>
+                              <span className={styles.itemStatus}>
+                                {source.content_preview}
+                              </span>
                             </div>
                           </li>
                         ))}

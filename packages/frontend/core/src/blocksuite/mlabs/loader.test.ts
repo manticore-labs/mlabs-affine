@@ -1,3 +1,4 @@
+/* oxlint-disable typescript/no-floating-promises -- node:test callbacks are sync */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -10,7 +11,9 @@ import {
 } from './loader.ts';
 
 test('mlabs-framework is the primary builtin command', () => {
-  const spec = mlabsCommands().find(command => command.name === 'mlabs-framework');
+  const spec = mlabsCommands().find(
+    command => command.name === 'mlabs-framework'
+  );
   assert.ok(spec);
   assert.equal(spec.endpoint, '/mlabs/framework');
 });
@@ -20,11 +23,15 @@ test('dify-sources stays registered as a hidden alias', () => {
   assert.ok(spec);
   assert.equal(spec.endpoint, '/mlabs/framework');
   assert.equal(spec.showInSlashMenu, false);
-  assert.ok(mlabsSlashCommands().every(command => command.name !== 'dify-sources'));
+  assert.ok(
+    mlabsSlashCommands().every(command => command.name !== 'dify-sources')
+  );
 });
 
 test('the request body carries the page id', () => {
-  const spec = mlabsCommands().find(command => command.name === 'mlabs-framework');
+  const spec = mlabsCommands().find(
+    command => command.name === 'mlabs-framework'
+  );
   assert.ok(spec);
   assert.equal(
     mlabsCommandBody(spec, 'page-1'),
@@ -33,7 +40,9 @@ test('the request body carries the page id', () => {
 });
 
 test('running the command posts to its endpoint', async () => {
-  const spec = mlabsCommands().find(command => command.name === 'mlabs-framework');
+  const spec = mlabsCommands().find(
+    command => command.name === 'mlabs-framework'
+  );
   assert.ok(spec);
   let url = '';
   let method = '';

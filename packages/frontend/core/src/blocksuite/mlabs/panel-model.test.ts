@@ -1,3 +1,4 @@
+/* oxlint-disable typescript/no-floating-promises -- node:test callbacks are sync */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -5,19 +6,23 @@ import {
   canonicalPageUrl,
   changeLabel,
   emptyWhy,
+  foreignMinX,
   humanBridgeError,
   indexingNotice,
   isDocumentIndexing,
+  isOwnNode,
   openRequestBody,
+  type PageDoc,
+  paintPlan,
   readDatasetId,
   readWhy,
+  runOnStore,
   statusLabel,
   syncSummaryLabel,
   uploadRejection,
   whyRejection,
   writeDatasetId,
   writeWhy,
-  type PageDoc,
 } from './panel-model.ts';
 
 test('the dataset id is stored on the page document', () => {
@@ -52,7 +57,10 @@ test('upload checks match the bridge rules', () => {
     'Ese archivo lo reserva el vínculo de la página.'
   );
   assert.match(uploadRejection('paquete.zip', 4) ?? '', /no acepta/);
-  assert.match(uploadRejection('grande.pdf', 15 * 1024 * 1024 + 1) ?? '', /15 MB/);
+  assert.match(
+    uploadRejection('grande.pdf', 15 * 1024 * 1024 + 1) ?? '',
+    /15 MB/
+  );
 });
 
 test('bridge errors are shown in Spanish', () => {
@@ -66,12 +74,15 @@ test('indexing notice covers unfinished documents', () => {
   assert.equal(isDocumentIndexing('indexing'), true);
   assert.equal(isDocumentIndexing('completed'), false);
   assert.equal(
-    indexingNotice([{ id: '1', name: 'a.pdf', indexing_status: 'completed', error: null }]),
+    indexingNotice([
+      { id: '1', name: 'a.pdf', indexing_status: 'completed', error: null },
+    ]),
     null
   );
   assert.match(
-    indexingNotice([{ id: '1', name: 'a.pdf', indexing_status: 'indexing', error: null }]) ??
-      '',
+    indexingNotice([
+      { id: '1', name: 'a.pdf', indexing_status: 'indexing', error: null },
+    ]) ?? '',
     /a\.pdf/
   );
   assert.equal(
@@ -116,6 +127,44 @@ test('the WHY contract is stored on the page document', () => {
   assert.equal(stored.to, '8');
   assert.equal(stored.unit, 'horas/semana');
   assert.equal(stored.okr_alignment, 'OKR Q4');
+});
+
+test('paint places Z1 + WHY→WHO→HOW→WHAT to the left of a note', () => {
+  assert.equal(foreignMinX([]), null);
+  assert.equal(foreignMinX(['nope']), null);
+  assert.equal(foreignMinX(['[0,0,498,194]']), 0);
+  const empty = paintPlan(null);
+  assert.equal(empty.shapes.length, 6);
+  assert.equal(empty.shapes[0].name, 'Mlabs Core');
+  assert.equal(empty.shapes[1].name, 'Adrian Eguez');
+  assert.equal(empty.shapes[2].name, 'WHY');
+  assert.equal(empty.shapes[5].name, 'WHAT');
+  assert.ok(empty.connectors.length >= 5);
+  assert.equal(empty.shapes[0].xywh, '[0,0,160,64]');
+  assert.equal(empty.shapes[1].xywh, '[0,88,160,64]');
+  assert.equal(empty.shapes[2].xywh, '[200,0,160,64]');
+  const beside = paintPlan(foreignMinX(['[-78.5,-4,498,194]']));
+  assert.equal(beside.shapes[0].xywh, '[-1238.5,0,160,64]');
+  assert.equal(isOwnNode({ id: 'mlabs:team:mlabs-core' }), true);
+  assert.equal(isOwnNode({ id: 'nano', role: 'person' }), true);
+  assert.equal(isOwnNode({ id: 'TVR4dPU24a', text: 'Mlabs Core' }), true);
+  assert.equal(isOwnNode({ id: 'why-1', role: 'why' }), true);
+  assert.equal(isOwnNode({ id: 'note-1' }), false);
+});
+
+test('store.transact keeps its this when painting', () => {
+  let ran = false;
+  const store = {
+    _shouldTransact: true,
+    transact(fn: () => void, flag = this._shouldTransact) {
+      assert.equal(flag, true);
+      fn();
+    },
+  };
+  runOnStore(store, () => {
+    ran = true;
+  });
+  assert.equal(ran, true);
 });
 
 function memoryDoc(): PageDoc {

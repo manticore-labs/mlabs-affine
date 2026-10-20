@@ -18,6 +18,7 @@ export function MlabsSlashMenuConfigExtension() {
             pageId: std.store.id,
             pageUrl: globalThis.location?.href,
             doc: std.store.spaceDoc,
+            store: std.store,
           });
         },
       })),

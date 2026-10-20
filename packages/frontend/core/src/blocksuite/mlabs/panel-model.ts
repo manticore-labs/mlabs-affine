@@ -88,7 +88,8 @@ export function readWhy(doc: PageDoc | undefined): WhyDraft {
       from: typeof body.from === 'string' ? body.from : '',
       to: typeof body.to === 'string' ? body.to : '',
       unit: typeof body.unit === 'string' ? body.unit : '',
-      okr_alignment: typeof body.okr_alignment === 'string' ? body.okr_alignment : '',
+      okr_alignment:
+        typeof body.okr_alignment === 'string' ? body.okr_alignment : '',
     };
   } catch {
     return blank;
@@ -114,7 +115,10 @@ export function whyRejection(draft: WhyDraft): string | null {
   const statement = draft.statement.trim();
   if (statement.length === 0) return 'Escribí el objetivo de negocio.';
   if (statement.length > 400) return 'El objetivo supera 400 caracteres.';
-  if (draft.indicator_type !== 'leading' && draft.indicator_type !== 'lagging') {
+  if (
+    draft.indicator_type !== 'leading' &&
+    draft.indicator_type !== 'lagging'
+  ) {
     return 'Elegí leading o lagging.';
   }
   const from = Number(draft.from);
@@ -123,14 +127,18 @@ export function whyRejection(draft: WhyDraft): string | null {
     return 'From y To tienen que ser números.';
   }
   const unit = draft.unit.trim();
-  if (unit.length === 0 || unit.length > 40) return 'Indicá la unidad (máx. 40).';
+  if (unit.length === 0 || unit.length > 40)
+    return 'Indicá la unidad (máx. 40).';
   const okr = draft.okr_alignment.trim();
   if (okr.length > 200) return 'La alineación OKR supera 200 caracteres.';
   return null;
 }
 
-export function canonicalPageUrl(value: string | undefined): string | undefined {
-  if (!value || value.length > 500 || !/^https:\/\/\S+$/.test(value)) return undefined;
+export function canonicalPageUrl(
+  value: string | undefined
+): string | undefined {
+  if (!value || value.length > 500 || !/^https:\/\/\S+$/.test(value))
+    return undefined;
   return value;
 }
 
@@ -190,7 +198,9 @@ export function isDocumentIndexing(status: string): boolean {
 }
 
 export function indexingNotice(documents: SourceDocument[]): string | null {
-  const pending = documents.filter(doc => isDocumentIndexing(doc.indexing_status));
+  const pending = documents.filter(doc =>
+    isDocumentIndexing(doc.indexing_status)
+  );
   if (pending.length === 0) return null;
   if (pending.length === 1) {
     return `“${pending[0].name}” todavía se indexa. Esperá a Listo para que Preguntar lo use entero.`;
@@ -230,13 +240,295 @@ export function changeLabel(change: SourceDocument['change']): string {
   return '';
 }
 
+export const SHAPE_W = 160;
+export const SHAPE_H = 64;
+export const SHAPE_GAP_Y = 24;
+export const SHAPE_GAP_X = 200;
+export const COL_GAP = 40;
+/** Full impact-map width left of the note: Z1 + WHY→WHO→HOW→WHAT */
+export const TREE_COLS = 5;
+
+export type CanvasNode = {
+  id: string;
+  role?: string;
+  externalId?: string;
+  text?: string;
+};
+
+export type PaintRole = 'team' | 'person' | 'why' | 'who' | 'how' | 'what';
+
+export type PaintShape = {
+  role: PaintRole;
+  externalId: string;
+  name: string;
+  xywh: string;
+  fillColor: string;
+  strokeStyle: 'solid' | 'dash';
+  attrs: Record<string, string>;
+};
+
+export type PaintConnector = {
+  fromExternalId: string;
+  toExternalId: string;
+};
+
+export type PaintPlan = {
+  shapes: PaintShape[];
+  connectors: PaintConnector[];
+};
+
+export type RegistryTree = {
+  actors?: Array<{
+    external_id: string;
+    kind: string;
+    name: string;
+    status?: string;
+    attrs?: Record<string, unknown>;
+  }>;
+  artifacts?: Array<{
+    external_id: string;
+    kind: string;
+    body?: { label?: string; statement?: string };
+    verification?: string;
+  }>;
+  edges?: Array<{
+    from_id?: string;
+    to_id?: string;
+    rel?: string;
+  }>;
+};
+
+const COLOR_OK = '#3cbc36';
+const COLOR_PROPOSED = '#e6b422';
+
+const FALLBACK_Z1: Array<Omit<PaintShape, 'xywh'>> = [
+  {
+    role: 'team',
+    externalId: 'mlabs-core',
+    name: 'Mlabs Core',
+    fillColor: COLOR_OK,
+    strokeStyle: 'solid',
+    attrs: {
+      email: '',
+      affine_user_id: '',
+      plane_user_id: '',
+      buzz_pubkey: '',
+    },
+  },
+  {
+    role: 'person',
+    externalId: 'adrian-eguez',
+    name: 'Adrian Eguez',
+    fillColor: COLOR_OK,
+    strokeStyle: 'solid',
+    attrs: {
+      email: '',
+      affine_user_id: '58eefc79-b154-4202-a83c-9cfe6930c165',
+      plane_user_id: '',
+      buzz_pubkey:
+        '1aab62cb42ea5682d5a7dd4b221d9b75f002acc531f2464d35c044e394122f3e',
+    },
+  },
+];
+
+const FALLBACK_Z3: Array<Omit<PaintShape, 'xywh'>> = [
+  {
+    role: 'why',
+    externalId: 'why-poc',
+    name: 'WHY',
+    fillColor: COLOR_PROPOSED,
+    strokeStyle: 'dash',
+    attrs: { statement: 'Objetivo de negocio (KPI)' },
+  },
+  {
+    role: 'who',
+    externalId: 'who-poc',
+    name: 'WHO',
+    fillColor: COLOR_PROPOSED,
+    strokeStyle: 'dash',
+    attrs: { statement: 'Actores que mueven el KPI' },
+  },
+  {
+    role: 'how',
+    externalId: 'how-poc',
+    name: 'HOW',
+    fillColor: COLOR_PROPOSED,
+    strokeStyle: 'dash',
+    attrs: { statement: 'Capacidades / cambios' },
+  },
+  {
+    role: 'what',
+    externalId: 'what-poc',
+    name: 'WHAT',
+    fillColor: COLOR_PROPOSED,
+    strokeStyle: 'dash',
+    attrs: { statement: 'Entregables / features' },
+  },
+];
+
+const OWN_ROLES = new Set<string>([
+  'person',
+  'team',
+  'why',
+  'who',
+  'how',
+  'what',
+]);
+const OWN_TEXT = new Set([...FALLBACK_Z1, ...FALLBACK_Z3].map(row => row.name));
+const OWN_EXTERNAL = new Set(
+  [...FALLBACK_Z1, ...FALLBACK_Z3].map(row => row.externalId)
+);
+
+export function isOwnNode(node: CanvasNode): boolean {
+  return (
+    (typeof node.role === 'string' && OWN_ROLES.has(node.role)) ||
+    (typeof node.externalId === 'string' &&
+      OWN_EXTERNAL.has(node.externalId)) ||
+    node.id.startsWith('mlabs:person:') ||
+    node.id.startsWith('mlabs:team:') ||
+    node.id.startsWith('mlabs:artifact:') ||
+    (typeof node.text === 'string' && OWN_TEXT.has(node.text))
+  );
+}
+
+export function runOnStore(
+  store: { transact?: (fn: () => void) => void } | undefined,
+  fn: () => void
+) {
+  if (store?.transact) store.transact(fn);
+  else fn();
+}
+
+export function foreignMinX(xywhs: Array<string | undefined>): number | null {
+  const xs: number[] = [];
+  for (const xywh of xywhs) {
+    if (!xywh) continue;
+    try {
+      const parsed = JSON.parse(xywh) as unknown;
+      if (
+        Array.isArray(parsed) &&
+        parsed.length === 4 &&
+        parsed.every(part => typeof part === 'number' && Number.isFinite(part))
+      ) {
+        xs.push(parsed[0] as number);
+      }
+    } catch {
+      /* ignore a note the canvas cannot measure */
+    }
+  }
+  if (xs.length === 0) return null;
+  return Math.min(...xs);
+}
+
+function treeOriginX(foreignLeft: number | null): number {
+  const width = TREE_COLS * SHAPE_W + (TREE_COLS - 1) * COL_GAP + SHAPE_GAP_X;
+  return foreignLeft == null ? 0 : foreignLeft - width;
+}
+
+function place(
+  row: Omit<PaintShape, 'xywh'>,
+  col: number,
+  rowIndex: number,
+  originX: number
+): PaintShape {
+  const x = originX + col * (SHAPE_W + COL_GAP);
+  const y = rowIndex * (SHAPE_H + SHAPE_GAP_Y);
+  return { ...row, xywh: `[${x},${y},${SHAPE_W},${SHAPE_H}]` };
+}
+
+/** Default full tree (Z1 + impact map) — also fallback if registry unavailable. */
+export function paintPlan(foreignLeft: number | null): PaintPlan {
+  return paintPlanFromTree(null, foreignLeft);
+}
+
+export function paintPlanFromTree(
+  tree: RegistryTree | null,
+  foreignLeft: number | null
+): PaintPlan {
+  const originX = treeOriginX(foreignLeft);
+  const z1: Array<Omit<PaintShape, 'xywh'>> = [];
+  if (tree?.actors?.length) {
+    for (const actor of tree.actors) {
+      if (actor.kind !== 'team' && actor.kind !== 'person') continue;
+      if (actor.external_id.includes('smoke')) continue;
+      const short =
+        actor.external_id.replace(/^mlabs:/, '') || actor.external_id;
+      z1.push({
+        role: actor.kind,
+        externalId: short,
+        name: actor.name,
+        fillColor: actor.status === 'active' ? COLOR_OK : COLOR_PROPOSED,
+        strokeStyle: actor.status === 'active' ? 'solid' : 'dash',
+        attrs: {
+          email: String(actor.attrs?.email ?? ''),
+          affine_user_id: String(actor.attrs?.affine_user_id ?? ''),
+          plane_user_id: String(actor.attrs?.plane_user_id ?? ''),
+          buzz_pubkey: String(actor.attrs?.buzz_pubkey ?? ''),
+        },
+      });
+    }
+  }
+  if (z1.length === 0) z1.push(...FALLBACK_Z1);
+
+  const z3: Array<Omit<PaintShape, 'xywh'>> = [];
+  const kindOrder: PaintRole[] = ['why', 'who', 'how', 'what'];
+  if (tree?.artifacts?.length) {
+    for (const kind of kindOrder) {
+      const art = tree.artifacts.find(a => a.kind === kind);
+      if (!art) continue;
+      const label = art.body?.label || kind.toUpperCase();
+      const verified = art.verification === 'verified';
+      z3.push({
+        role: kind,
+        externalId: art.external_id,
+        name: label,
+        fillColor: verified ? COLOR_OK : COLOR_PROPOSED,
+        strokeStyle: verified ? 'solid' : 'dash',
+        attrs: { statement: String(art.body?.statement ?? '') },
+      });
+    }
+  }
+  if (z3.length === 0) z3.push(...FALLBACK_Z3);
+
+  const shapes: PaintShape[] = [
+    ...z1.map((row, i) => place(row, 0, i, originX)),
+    ...z3.map((row, i) => place(row, i + 1, 0, originX)),
+  ];
+
+  const connectors: PaintConnector[] = [];
+  for (let i = 0; i < z3.length - 1; i++) {
+    connectors.push({
+      fromExternalId: z3[i].externalId,
+      toExternalId: z3[i + 1].externalId,
+    });
+  }
+  const who = z3.find(s => s.role === 'who');
+  if (who) {
+    for (const actor of z1) {
+      connectors.push({
+        fromExternalId: actor.externalId,
+        toExternalId: who.externalId,
+      });
+    }
+  }
+
+  // Register labels for isOwnNode after dynamic names
+  for (const s of shapes) {
+    OWN_TEXT.add(s.name);
+    OWN_EXTERNAL.add(s.externalId);
+  }
+
+  return { shapes, connectors };
+}
+
 export function humanBridgeError(code: string, detail?: string): string {
   const messages: Record<string, string> = {
     bad_request:
       'Falta el dataset de esta página. Cerrá el panel y volvé a abrir /mlabs-framework.',
     bad_question: 'Escribí una pregunta antes de enviar.',
     freellm_unconfigured: 'FreeLLMAPI no está configurado en el puente.',
-    freellm_unavailable: 'FreeLLMAPI no respondió. Probá de nuevo en un momento.',
+    freellm_unavailable:
+      'FreeLLMAPI no respondió. Probá de nuevo en un momento.',
     bad_json: 'La petición no es válida.',
     bad_name: 'El nombre no es válido (máx. 40 caracteres).',
     bad_description: 'La descripción es demasiado larga.',
@@ -245,7 +537,8 @@ export function humanBridgeError(code: string, detail?: string): string {
     too_large: 'El archivo supera 15 MB.',
     dataset_missing: 'No encontramos ese dataset en Dify.',
     document_missing: 'Ese archivo ya no está en el dataset.',
-    page_file_protected: 'Ese archivo es el vínculo de la página y no se puede tocar aquí.',
+    page_file_protected:
+      'Ese archivo es el vínculo de la página y no se puede tocar aquí.',
     name_taken: 'Ya hay otro dataset con ese nombre.',
     dify_unconfigured: 'El puente a Dify no está configurado.',
     dify_unavailable: 'Dify no respondió. Probá de nuevo en un momento.',

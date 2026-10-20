@@ -233,6 +233,8 @@ export async function paintPeople(
       xywh: shape.xywh,
       filled: true,
       fillColor: shape.fillColor,
+      color: shape.color,
+      padding: shape.padding,
       strokeColor: '#000000',
       strokeWidth: 4,
       strokeStyle: shape.strokeStyle,
@@ -373,6 +375,45 @@ export function DifySourcesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!focusFeedback) return;
+    const loadFeedbackNodes = async () => {
+      try {
+        const tree = await fetchRegistryTree(fetchImpl);
+        const nodes: Array<{
+          externalId: string;
+          kind: string;
+          label: string;
+          statement: string;
+        }> = [];
+        for (const a of tree?.actors ?? []) {
+          if (a.external_id.includes('smoke')) continue;
+          nodes.push({
+            externalId: a.external_id.replace(/^mlabs:/, ''),
+            kind: a.kind,
+            label: a.name,
+            statement: '',
+          });
+        }
+        for (const art of tree?.artifacts ?? []) {
+          nodes.push({
+            externalId: art.external_id,
+            kind: art.kind,
+            label: art.body?.label || art.kind.toUpperCase(),
+            statement: String(art.body?.statement ?? ''),
+          });
+        }
+        setFeedbackNodes(nodes);
+        if (nodes[0]) setFeedbackPick(nodes[0].externalId);
+      } catch {
+        /* feedback list is best-effort; user can retry via select focus */
+      }
+    };
+    loadFeedbackNodes().catch(() => {
+      /* swallowed above */
+    });
+  }, [fetchImpl, focusFeedback]);
+
   const run = async (fallback: string, action: () => Promise<void>) => {
     setActionBusy(true);
     setError(null);
@@ -451,7 +492,7 @@ export function DifySourcesPanel({
               WHY
             </Tabs.Trigger>
             <Tabs.Trigger value="pintar" className={styles.tabTrigger}>
-              {focusFeedback ? '💬 Pintar' : 'Pintar'}
+              {focusFeedback ? '💬 Comentario' : 'Pintar'}
             </Tabs.Trigger>
           </Tabs.List>
 
@@ -784,146 +825,163 @@ export function DifySourcesPanel({
 
           <Tabs.Content value="pintar">
             <section className={styles.section}>
-              <p className={styles.lead}>
-                Pinta el caso real desde el registry (equipos, roles, personas,
-                jerarquía + WHY→WHO→HOW→WHAT con textos). Verde = activo; azul =
-                rol; amarillo = propuesto. Luego podés mandar un nodo a Dify
-                (doc en el dataset de esta página).
-              </p>
-              <div className={styles.actions}>
-                <Button
-                  variant="primary"
-                  disabled={actionBusy}
-                  loading={actionBusy}
-                  onClick={() =>
-                    void run('No pude pintar el lienzo.', async () => {
-                      const tree = await fetchRegistryTree(fetchImpl);
-                      const count = await paintPeople(store, fetchImpl);
-                      const nodes: Array<{
-                        externalId: string;
-                        kind: string;
-                        label: string;
-                        statement: string;
-                      }> = [];
-                      for (const a of tree?.actors ?? []) {
-                        if (a.external_id.includes('smoke')) continue;
-                        nodes.push({
-                          externalId: a.external_id.replace(/^mlabs:/, ''),
-                          kind: a.kind,
-                          label: a.name,
-                          statement: '',
+              {focusFeedback ? (
+                <>
+                  <p className={styles.lead} id="mlabs-feedback-anchor">
+                    💬 Comentario Mlabs → Dify: elegí nodo y nota opcional. El
+                    doc queda en Fuentes como <code>mlabs-feedback-….md</code>.
+                  </p>
+                  <label className={styles.field}>
+                    <span>Nodo</span>
+                    <select
+                      className={styles.textarea}
+                      value={feedbackPick}
+                      disabled={actionBusy || feedbackNodes.length === 0}
+                      onChange={event => setFeedbackPick(event.target.value)}
+                      onFocus={() => {
+                        if (feedbackNodes.length > 0) return;
+                        run('No pude cargar nodos.', async () => {
+                          const tree = await fetchRegistryTree(fetchImpl);
+                          const nodes: Array<{
+                            externalId: string;
+                            kind: string;
+                            label: string;
+                            statement: string;
+                          }> = [];
+                          for (const a of tree?.actors ?? []) {
+                            if (a.external_id.includes('smoke')) continue;
+                            nodes.push({
+                              externalId: a.external_id.replace(/^mlabs:/, ''),
+                              kind: a.kind,
+                              label: a.name,
+                              statement: '',
+                            });
+                          }
+                          for (const art of tree?.artifacts ?? []) {
+                            nodes.push({
+                              externalId: art.external_id,
+                              kind: art.kind,
+                              label: art.body?.label || art.kind.toUpperCase(),
+                              statement: String(art.body?.statement ?? ''),
+                            });
+                          }
+                          setFeedbackNodes(nodes);
+                          if (nodes[0] && !feedbackPick) {
+                            setFeedbackPick(nodes[0].externalId);
+                          }
+                        }).catch(() => {
+                          /* run() already notifies */
                         });
+                      }}
+                    >
+                      {feedbackNodes.length === 0 ? (
+                        <option value="">Cargá el listado (click aquí)</option>
+                      ) : (
+                        feedbackNodes.map(node => (
+                          <option key={node.externalId} value={node.externalId}>
+                            [{node.kind}] {node.label}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span>Nota (opcional)</span>
+                    <textarea
+                      className={styles.textarea}
+                      value={feedbackNote}
+                      onChange={event => setFeedbackNote(event.target.value)}
+                      disabled={actionBusy}
+                      rows={3}
+                      placeholder="Contexto para RAG / HITL…"
+                    />
+                  </label>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="primary"
+                      disabled={
+                        !ready ||
+                        actionBusy ||
+                        !feedbackPick ||
+                        feedbackNodes.length === 0
                       }
-                      for (const art of tree?.artifacts ?? []) {
-                        nodes.push({
-                          externalId: art.external_id,
-                          kind: art.kind,
-                          label: art.body?.label || art.kind.toUpperCase(),
-                          statement: String(art.body?.statement ?? ''),
-                        });
+                      loading={actionBusy}
+                      onClick={() =>
+                        void run(
+                          'No pude enviar el feedback a Dify.',
+                          async () => {
+                            if (!datasetId) return;
+                            const node = feedbackNodes.find(
+                              n => n.externalId === feedbackPick
+                            );
+                            if (!node)
+                              throw new Error('Elegí un nodo del árbol.');
+                            const response = await fetchImpl(
+                              `${FRAMEWORK}/feedback`,
+                              {
+                                method: 'POST',
+                                headers: { 'content-type': 'application/json' },
+                                body: JSON.stringify({
+                                  dataset_id: datasetId,
+                                  page_id: pageId,
+                                  external_id: node.externalId,
+                                  kind: node.kind,
+                                  label: node.label,
+                                  statement: node.statement,
+                                  note: feedbackNote.trim(),
+                                  engagement_id: 'poc-s1',
+                                  request_id: crypto.randomUUID(),
+                                }),
+                              }
+                            );
+                            if (!response.ok) {
+                              throw new Error(await readBridgeError(response));
+                            }
+                            const body = (await response.json()) as {
+                              document?: { name?: string };
+                            };
+                            notify.success({
+                              title: 'Mlabs Framework',
+                              message: `Enviado a Dify: ${body.document?.name ?? node.label}`,
+                            });
+                            setFeedbackNote('');
+                          }
+                        )
                       }
-                      setFeedbackNodes(nodes);
-                      if (nodes[0] && !feedbackPick) {
-                        setFeedbackPick(nodes[0].externalId);
+                    >
+                      💬 Enviar comentario a Dify
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className={styles.lead}>
+                    Pinta el caso desde el registry (equipos, personas,
+                    jerarquía + WHY→WHO→HOW→WHAT + escenarios). Verde =
+                    personas; amarillo = metodología; ❓ = HITL. Comentario a
+                    Dify: slash <code>💬 Comentario Mlabs</code> o botón 💬 del
+                    toolbar del lienzo (edgeless, con un shape seleccionado).
+                  </p>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="primary"
+                      disabled={actionBusy}
+                      loading={actionBusy}
+                      onClick={() =>
+                        void run('No pude pintar el lienzo.', async () => {
+                          const count = await paintPeople(store, fetchImpl);
+                          notify.success({
+                            title: 'Mlabs Framework',
+                            message: `Pintados ${count} nodos del árbol.`,
+                          });
+                        })
                       }
-                      notify.success({
-                        title: 'Mlabs Framework',
-                        message: `Pintados ${count} nodos del árbol.`,
-                      });
-                    })
-                  }
-                >
-                  Pintar
-                </Button>
-              </div>
-              <p className={styles.lead} id="mlabs-feedback-anchor">
-                💬 Comentario Mlabs → Dify: elegí nodo (WHY/WHO/persona/…) y
-                opcional una nota. También desde slash{' '}
-                <code>💬 Comentario Mlabs</code> o el botón 💬 del toolbar del
-                lienzo.
-              </p>
-              <label className={styles.field}>
-                <span>Nodo</span>
-                <select
-                  className={styles.textarea}
-                  value={feedbackPick}
-                  disabled={actionBusy || feedbackNodes.length === 0}
-                  onChange={event => setFeedbackPick(event.target.value)}
-                >
-                  {feedbackNodes.length === 0 ? (
-                    <option value="">Primero pintá el árbol</option>
-                  ) : (
-                    feedbackNodes.map(node => (
-                      <option key={node.externalId} value={node.externalId}>
-                        [{node.kind}] {node.label}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </label>
-              <label className={styles.field}>
-                <span>Nota (opcional)</span>
-                <textarea
-                  className={styles.textarea}
-                  value={feedbackNote}
-                  onChange={event => setFeedbackNote(event.target.value)}
-                  disabled={actionBusy}
-                  rows={3}
-                  placeholder="Contexto para RAG / HITL…"
-                />
-              </label>
-              <div className={styles.actions}>
-                <Button
-                  variant="primary"
-                  disabled={
-                    !ready ||
-                    actionBusy ||
-                    !feedbackPick ||
-                    feedbackNodes.length === 0
-                  }
-                  loading={actionBusy}
-                  onClick={() =>
-                    void run('No pude enviar el feedback a Dify.', async () => {
-                      if (!datasetId) return;
-                      const node = feedbackNodes.find(
-                        n => n.externalId === feedbackPick
-                      );
-                      if (!node) throw new Error('Elegí un nodo del árbol.');
-                      const response = await fetchImpl(
-                        `${FRAMEWORK}/feedback`,
-                        {
-                          method: 'POST',
-                          headers: { 'content-type': 'application/json' },
-                          body: JSON.stringify({
-                            dataset_id: datasetId,
-                            page_id: pageId,
-                            external_id: node.externalId,
-                            kind: node.kind,
-                            label: node.label,
-                            statement: node.statement,
-                            note: feedbackNote.trim(),
-                            engagement_id: 'poc-s1',
-                            request_id: crypto.randomUUID(),
-                          }),
-                        }
-                      );
-                      if (!response.ok) {
-                        throw new Error(await readBridgeError(response));
-                      }
-                      const body = (await response.json()) as {
-                        document?: { name?: string };
-                      };
-                      notify.success({
-                        title: 'Mlabs Framework',
-                        message: `Enviado a Dify: ${body.document?.name ?? node.label}`,
-                      });
-                      setFeedbackNote('');
-                    })
-                  }
-                >
-                  💬 Enviar comentario a Dify
-                </Button>
-              </div>
+                    >
+                      Pintar
+                    </Button>
+                  </div>
+                </>
+              )}
             </section>
           </Tabs.Content>
 

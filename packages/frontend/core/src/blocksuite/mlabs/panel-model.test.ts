@@ -208,10 +208,15 @@ test('lane layout: EQUIPOS title + team height from members + WHY lanes', () => 
   );
   const team = tree.shapes.find(s => s.role === 'team');
   assert.ok(team);
-  // 2 members → height = 2*128 + 16
-  assert.match(team!.xywh, /\[.*,.*,150,272\]/);
+  // 2 members → height = 2*168 + 20
+  assert.match(team!.xywh, /\[.*,.*,160,356\]/);
   assert.ok(tree.shapes.some(s => s.text.includes('📧 adrian@')));
   assert.ok(tree.shapes.some(s => s.role === 'question'));
+  // Yellow WHY card must not repeat the "WHY" prefix in the body label
+  const whyCard = tree.shapes.find(s => s.role === 'why');
+  assert.ok(whyCard);
+  assert.equal(whyCard!.text.startsWith('WHY'), false);
+  assert.ok(whyCard!.color === '#141414' || whyCard!.padding?.[0] >= 16);
   assert.ok(tree.connectors.some(c => c.fromExternalId === 'gestion-admin'));
 });
 

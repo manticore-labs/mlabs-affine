@@ -14,8 +14,10 @@ export function mlabsSurfaceToolbarConfig(): ToolbarModuleConfig {
         placement: ActionPlacement.Start,
         id: 'A.mlabs.feedback',
         score: -2,
-        when(ctx) {
-          return ctx.getSurfaceModels().length > 0;
+        when() {
+          // Visible whenever the surface selection toolbar is mounted
+          // (edgeless + at least one shape/connector selected).
+          return true;
         },
         content: ({ host }) => {
           const onClick = () => {

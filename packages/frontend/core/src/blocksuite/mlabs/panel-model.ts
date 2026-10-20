@@ -241,16 +241,20 @@ export function changeLabel(change: SourceDocument['change']): string {
 }
 
 export const SHAPE_W = 200;
-export const MEMBER_W = 260;
-export const MEMBER_H = 128;
-export const TEAM_W = 150;
-export const LANE_CHILD_W = 200;
-export const LANE_CHILD_H = 110;
+export const MEMBER_W = 280;
+export const MEMBER_H = 168;
+export const TEAM_W = 160;
+export const LANE_CHILD_W = 220;
+export const LANE_CHILD_H = 128;
 export const TITLE_H = 44;
-export const SHAPE_GAP_Y = 16;
-export const SHAPE_GAP_X = 24;
-export const SECTION_GAP = 48;
-export const COL_GAP = 24;
+export const SHAPE_GAP_Y = 20;
+export const SHAPE_GAP_X = 28;
+export const SECTION_GAP = 56;
+export const COL_GAP = 28;
+/** [vertical, horizontal] text padding inside shapes */
+export const SHAPE_PAD: [number, number] = [22, 28];
+export const COLOR_TEXT_LIGHT = '#f5f5f5';
+export const COLOR_TEXT_DARK = '#141414';
 
 export type CanvasNode = {
   id: string;
@@ -268,6 +272,7 @@ export type PaintRole =
   | 'who'
   | 'how'
   | 'what'
+  | 'scenario'
   | 'question';
 
 export type PaintShape = {
@@ -277,6 +282,8 @@ export type PaintShape = {
   text: string;
   xywh: string;
   fillColor: string;
+  color: string;
+  padding: [number, number];
   strokeStyle: 'solid' | 'dash';
   attrs: Record<string, string>;
 };
@@ -325,12 +332,35 @@ const COLOR_PROPOSED = '#e6b422';
 const COLOR_TITLE = '#2a2a2a';
 const COLOR_TEAM = '#1f6f4a';
 const COLOR_Q = '#c45c26';
+const COLOR_SCENARIO = '#6b5b95';
 
 export function shapeCaption(label: string, statement?: string): string {
   const body = (statement ?? '').trim();
   if (!body) return label;
   const clipped = body.length > 120 ? `${body.slice(0, 117)}…` : body;
   return `${label}\n${clipped}`;
+}
+
+/** Strip redundant WHY/WHO/HOW/WHAT prefix — section title already names the kind. */
+export function methodologyCardText(
+  label: string,
+  statement?: string,
+  kind?: string
+): string {
+  const kindRe = kind
+    ? new RegExp(`^${kind}\\s*[·.•\\-–:]?\\s*`, 'i')
+    : /^(WHY|WHO|HOW|WHAT|SCENARIO)\s*[·.•\-–:]?\s*/i;
+  const clean = (label || '').replace(kindRe, '').trim() || label;
+  const body = (statement ?? '').trim();
+  if (!body) return clean;
+  if (body === clean) return clean;
+  const clipped = body.length > 140 ? `${body.slice(0, 137)}…` : body;
+  return `${clean}\n${clipped}`;
+}
+
+function textOn(fill: string): string {
+  const darkFills = new Set([COLOR_TITLE, COLOR_TEAM, COLOR_Q, COLOR_SCENARIO]);
+  return darkFills.has(fill) ? COLOR_TEXT_LIGHT : COLOR_TEXT_DARK;
 }
 
 function shortId(externalId: string): string {
@@ -378,11 +408,17 @@ const OWN_ROLES = new Set<string>([
   'who',
   'how',
   'what',
+  'scenario',
   'question',
   'connector',
 ]);
-const OWN_TEXT = new Set<string>(['EQUIPOS', 'WHY']);
-const OWN_EXTERNAL = new Set<string>(['title-equipos', 'title-why']);
+const OWN_TEXT = new Set<string>(['EQUIPOS', 'WHY', 'SIN EQUIPO', 'SCENARIOS']);
+const OWN_EXTERNAL = new Set<string>([
+  'title-equipos',
+  'title-why',
+  'title-orphans',
+  'title-scenarios',
+]);
 
 export function isOwnNode(node: CanvasNode): boolean {
   return (
@@ -425,13 +461,20 @@ export function foreignMinX(xywhs: Array<string | undefined>): number | null {
 }
 
 function box(
-  row: Omit<PaintShape, 'xywh'>,
+  row: Omit<PaintShape, 'xywh' | 'color' | 'padding'> &
+    Partial<Pick<PaintShape, 'color' | 'padding'>>,
   x: number,
   y: number,
   w: number,
   h: number
 ): PaintShape {
-  return { ...row, xywh: `[${x},${y},${w},${h}]` };
+  const fill = row.fillColor;
+  return {
+    ...row,
+    color: row.color ?? textOn(fill),
+    padding: row.padding ?? SHAPE_PAD,
+    xywh: `[${x},${y},${w},${h}]`,
+  };
 }
 
 /** Default / fallback + real tree lane layout. */
@@ -656,7 +699,67 @@ export function paintPlanFromTree(
     }
   }
 
-  // —— WHY lanes ——
+  // —— Personas sin equipo ——
+  const memberPersonExts = new Set<string>();
+  for (const list of memberOf.values()) {
+    for (const ext of list) memberPersonExts.add(ext);
+  }
+  const orphans = actors.filter(
+    a => a.kind === 'person' && !memberPersonExts.has(shortId(a.external_id))
+  );
+  if (orphans.length > 0) {
+    shapes.push(
+      box(
+        {
+          role: 'title',
+          externalId: 'title-orphans',
+          name: 'SIN EQUIPO',
+          text: 'SIN EQUIPO',
+          fillColor: COLOR_TITLE,
+          strokeStyle: 'solid',
+          attrs: { section: 'orphans' },
+        },
+        originX,
+        y,
+        TEAM_W + SHAPE_GAP_X + MEMBER_W,
+        TITLE_H
+      )
+    );
+    y += TITLE_H + SHAPE_GAP_Y;
+    orphans.forEach((person, i) => {
+      const pe = shortId(person.external_id);
+      const py = y + i * (MEMBER_H + SHAPE_GAP_Y);
+      shapes.push(
+        box(
+          {
+            role: 'person',
+            externalId: pe,
+            name: person.name,
+            text: personCardText(person.name, person.attrs, playsRole.get(pe)),
+            fillColor: COLOR_OK,
+            strokeStyle: 'dash',
+            attrs: {
+              email: attrStr(person.attrs, 'email'),
+              affine_user_id: attrStr(person.attrs, 'affine_user_id'),
+              plane_user_id: attrStr(person.attrs, 'plane_user_id'),
+              external_id: person.external_id,
+            },
+          },
+          originX + TEAM_W + SHAPE_GAP_X,
+          py,
+          MEMBER_W,
+          MEMBER_H
+        )
+      );
+    });
+    y +=
+      orphans.length * MEMBER_H +
+      Math.max(0, orphans.length - 1) * SHAPE_GAP_Y +
+      SECTION_GAP;
+  }
+
+  // —— WHY lanes (WHY | WHO… | HOW… | WHAT… stacked per column) ——
+  const whyLaneW = TEAM_W + 40 + SHAPE_GAP_X + LANE_CHILD_W * 3 + COL_GAP * 2;
   shapes.push(
     box(
       {
@@ -670,7 +773,7 @@ export function paintPlanFromTree(
       },
       originX,
       y,
-      TEAM_W + SHAPE_GAP_X + LANE_CHILD_W * 3 + COL_GAP * 2,
+      whyLaneW,
       TITLE_H
     )
   );
@@ -694,13 +797,69 @@ export function paintPlanFromTree(
             external_id: 'why-tiempo',
             kind: 'why',
             body: {
-              label: 'WHY · Tiempo',
+              label: 'Tiempo',
               statement: 'Reducir tiempo de decisión.',
               needs_human: true,
               question: '¿SLA objetivo en horas?',
             },
           },
         ];
+
+  const stackColumn = (
+    kids: typeof artifacts,
+    kind: PaintRole,
+    colX: number,
+    topY: number,
+    parentExt: string
+  ): number => {
+    let cy = topY;
+    for (const child of kids) {
+      const ce = child.external_id;
+      const label = child.body?.label || kind.toUpperCase();
+      shapes.push(
+        box(
+          {
+            role: kind,
+            externalId: ce,
+            name: label,
+            text: methodologyCardText(label, child.body?.statement, kind),
+            fillColor: COLOR_PROPOSED,
+            strokeStyle: 'dash',
+            attrs: { statement: String(child.body?.statement ?? '') },
+          },
+          colX,
+          cy,
+          LANE_CHILD_W,
+          LANE_CHILD_H
+        )
+      );
+      connectors.push({ fromExternalId: parentExt, toExternalId: ce });
+      cy += LANE_CHILD_H + SHAPE_GAP_Y;
+      if (child.body?.needs_human && child.body?.question) {
+        const qExt = `q-${ce}`;
+        shapes.push(
+          box(
+            {
+              role: 'question',
+              externalId: qExt,
+              name: 'Pregunta HITL',
+              text: `❓ ${child.body.question}`,
+              fillColor: COLOR_Q,
+              strokeStyle: 'solid',
+              attrs: { question: String(child.body.question) },
+            },
+            colX,
+            cy,
+            LANE_CHILD_W,
+            LANE_CHILD_H
+          )
+        );
+        connectors.push({ fromExternalId: ce, toExternalId: qExt });
+        cy += LANE_CHILD_H + SHAPE_GAP_Y;
+      }
+    }
+    return Math.max(0, cy - topY - SHAPE_GAP_Y);
+  };
 
   for (const why of whyList) {
     const whyExt = why.external_id;
@@ -709,26 +868,45 @@ export function paintPlanFromTree(
       : artifacts.filter(
           a =>
             a.kind !== 'why' &&
+            a.kind !== 'scenario' &&
             a.external_id.includes(whyExt.replace('why-', ''))
         );
-    const ordered = (['who', 'how', 'what'] as const)
-      .map(k => children.find(c => c.kind === k))
-      .filter(Boolean) as typeof artifacts;
+    const whoKids = children.filter(c => c.kind === 'who');
+    const howKids = children.filter(c => c.kind === 'how');
+    const whatKids = children.filter(c => c.kind === 'what');
     const needsQ = Boolean(why.body?.needs_human && why.body?.question);
-    const childRows = ordered.length + (needsQ ? 1 : 0);
-    const laneH = Math.max(
-      LANE_CHILD_H,
-      Math.max(1, childRows || 1) * LANE_CHILD_H +
-        Math.max(0, (childRows || 1) - 1) * SHAPE_GAP_Y
-    );
 
+    const colX0 = originX + TEAM_W + 40 + SHAPE_GAP_X;
+    // Measure column heights with a dry pass on copies of counters via stack after WHY box.
+    // First compute heights with temporary y, then place WHY with max height.
+    const measureCol = (kids: typeof artifacts): number => {
+      let h = 0;
+      for (const child of kids) {
+        h += LANE_CHILD_H + SHAPE_GAP_Y;
+        if (child.body?.needs_human && child.body?.question) {
+          h += LANE_CHILD_H + SHAPE_GAP_Y;
+        }
+      }
+      return Math.max(0, h - SHAPE_GAP_Y);
+    };
+    let laneH = Math.max(
+      LANE_CHILD_H,
+      measureCol(whoKids),
+      measureCol(howKids),
+      measureCol(whatKids)
+    );
+    if (needsQ) {
+      laneH = Math.max(laneH, LANE_CHILD_H * 2 + SHAPE_GAP_Y);
+    }
+
+    const whyLabel = why.body?.label || 'Sin título';
     shapes.push(
       box(
         {
           role: 'why',
           externalId: whyExt,
-          name: why.body?.label || 'WHY',
-          text: shapeCaption(why.body?.label || 'WHY', why.body?.statement),
+          name: whyLabel,
+          text: methodologyCardText(whyLabel, why.body?.statement, 'why'),
           fillColor: COLOR_PROPOSED,
           strokeStyle: 'dash',
           attrs: { statement: String(why.body?.statement ?? '') },
@@ -740,35 +918,18 @@ export function paintPlanFromTree(
       )
     );
 
-    let cx = originX + TEAM_W + 40 + SHAPE_GAP_X;
-    ordered.forEach((child, i) => {
-      const ce = child.external_id;
-      shapes.push(
-        box(
-          {
-            role: child.kind as PaintRole,
-            externalId: ce,
-            name: child.body?.label || child.kind.toUpperCase(),
-            text: shapeCaption(
-              child.body?.label || child.kind.toUpperCase(),
-              child.body?.statement
-            ),
-            fillColor: COLOR_PROPOSED,
-            strokeStyle: 'dash',
-            attrs: { statement: String(child.body?.statement ?? '') },
-          },
-          cx + i * (LANE_CHILD_W + COL_GAP),
-          y,
-          LANE_CHILD_W,
-          LANE_CHILD_H
-        )
-      );
-      connectors.push({ fromExternalId: whyExt, toExternalId: ce });
-    });
+    stackColumn(whoKids, 'who', colX0, y, whyExt);
+    stackColumn(howKids, 'how', colX0 + LANE_CHILD_W + COL_GAP, y, whyExt);
+    stackColumn(
+      whatKids,
+      'what',
+      colX0 + (LANE_CHILD_W + COL_GAP) * 2,
+      y,
+      whyExt
+    );
 
     if (needsQ) {
       const qExt = `q-${whyExt}`;
-      const qy = y + (ordered.length > 0 ? LANE_CHILD_H + SHAPE_GAP_Y : 0);
       shapes.push(
         box(
           {
@@ -780,8 +941,8 @@ export function paintPlanFromTree(
             strokeStyle: 'solid',
             attrs: { question: String(why.body?.question ?? '') },
           },
-          cx,
-          qy,
+          colX0,
+          y + laneH - LANE_CHILD_H,
           LANE_CHILD_W * 2 + COL_GAP,
           LANE_CHILD_H
         )
@@ -790,6 +951,65 @@ export function paintPlanFromTree(
     }
 
     y += laneH + SECTION_GAP;
+  }
+
+  // —— SCENARIOS (Gherkin) ——
+  const scenarios = artifacts.filter(a => a.kind === 'scenario');
+  if (scenarios.length > 0) {
+    shapes.push(
+      box(
+        {
+          role: 'title',
+          externalId: 'title-scenarios',
+          name: 'SCENARIOS',
+          text: 'SCENARIOS',
+          fillColor: COLOR_TITLE,
+          strokeStyle: 'solid',
+          attrs: { section: 'scenarios' },
+        },
+        originX,
+        y,
+        whyLaneW,
+        TITLE_H
+      )
+    );
+    y += TITLE_H + SHAPE_GAP_Y;
+    const scenW = Math.floor((whyLaneW - COL_GAP) / 2);
+    scenarios.forEach((sc, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const sx = originX + col * (scenW + COL_GAP);
+      const sy = y + row * (LANE_CHILD_H + SHAPE_GAP_Y);
+      const label = sc.body?.label || sc.external_id;
+      shapes.push(
+        box(
+          {
+            role: 'scenario',
+            externalId: sc.external_id,
+            name: label,
+            text: methodologyCardText(label, sc.body?.statement, 'scenario'),
+            fillColor: COLOR_SCENARIO,
+            strokeStyle: 'solid',
+            attrs: { statement: String(sc.body?.statement ?? '') },
+          },
+          sx,
+          sy,
+          scenW,
+          LANE_CHILD_H
+        )
+      );
+      if (sc.parent_id) {
+        const parent = artifacts.find(
+          a => String(a.id) === String(sc.parent_id)
+        );
+        if (parent) {
+          connectors.push({
+            fromExternalId: parent.external_id,
+            toExternalId: sc.external_id,
+          });
+        }
+      }
+    });
   }
 
   for (const s of shapes) {

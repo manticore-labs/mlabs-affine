@@ -390,6 +390,7 @@ export function DifySourcesPanel({
   >([]);
   const [feedbackPick, setFeedbackPick] = useState(initialFeedbackId ?? '');
   const [feedbackNote, setFeedbackNote] = useState('');
+  const [feedbackFile, setFeedbackFile] = useState<File | null>(null);
 
   const remember = useCallback(
     (id: string) => {
@@ -919,6 +920,34 @@ export function DifySourcesPanel({
                       placeholder="Contexto para RAG / HITL…"
                     />
                   </label>
+                  <div className={styles.uploadRow}>
+                    <Button
+                      variant="secondary"
+                      disabled={!ready || actionBusy}
+                      onClick={() => {
+                        const input =
+                          globalThis.document.createElement('input');
+                        input.type = 'file';
+                        input.accept =
+                          '.pdf,.md,.markdown,.txt,.doc,.docx,.csv,.html,.htm,.pptx,.xls,.xlsx,.vtt,.mdx';
+                        input.onchange = () => {
+                          setFeedbackFile(input.files?.[0] ?? null);
+                        };
+                        input.click();
+                      }}
+                    >
+                      Adjuntar archivo
+                    </Button>
+                    <span className={styles.fileName}>
+                      {feedbackFile
+                        ? feedbackFile.name
+                        : 'Sin adjunto (igual que Fuentes)'}
+                    </span>
+                  </div>
+                  <p className={styles.lead}>
+                    pdf, md, txt, docx… hasta 15 MB. Se indexa en el mismo
+                    dataset (Fuentes) y queda referenciado en el feedback.
+                  </p>
                   <div className={styles.actions}>
                     <Button
                       variant="primary"
@@ -939,6 +968,32 @@ export function DifySourcesPanel({
                             );
                             if (!node)
                               throw new Error('Elegí un nodo del árbol.');
+                            let attachmentName: string | undefined;
+                            if (feedbackFile) {
+                              const rejection = uploadRejection(
+                                feedbackFile.name,
+                                feedbackFile.size
+                              );
+                              if (rejection) throw new Error(rejection);
+                              const up = await fetchImpl(
+                                `${FRAMEWORK}/documents`,
+                                {
+                                  method: 'POST',
+                                  headers: {
+                                    'content-type': 'application/octet-stream',
+                                    'x-mlabs-dataset-id': datasetId,
+                                    'x-mlabs-file-name': encodeURIComponent(
+                                      feedbackFile.name
+                                    ),
+                                  },
+                                  body: feedbackFile,
+                                }
+                              );
+                              if (!up.ok) {
+                                throw new Error(await readBridgeError(up));
+                              }
+                              attachmentName = feedbackFile.name;
+                            }
                             const response = await fetchImpl(
                               `${FRAMEWORK}/feedback`,
                               {
@@ -952,6 +1007,7 @@ export function DifySourcesPanel({
                                   label: node.label,
                                   statement: node.statement,
                                   note: feedbackNote.trim(),
+                                  attachment: attachmentName,
                                   engagement_id: 'poc-s1',
                                   request_id: crypto.randomUUID(),
                                 }),
@@ -965,9 +1021,13 @@ export function DifySourcesPanel({
                             };
                             notify.success({
                               title: 'Mlabs Framework',
-                              message: `Enviado a Dify: ${body.document?.name ?? node.label}`,
+                              message: attachmentName
+                                ? `Enviado + adjunto «${attachmentName}»: ${body.document?.name ?? node.label}`
+                                : `Enviado a Dify: ${body.document?.name ?? node.label}`,
                             });
                             setFeedbackNote('');
+                            setFeedbackFile(null);
+                            if (attachmentName) await refresh(datasetId);
                           }
                         )
                       }

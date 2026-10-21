@@ -11,7 +11,157 @@ export type FeedbackNode = {
   kind: string;
   label: string;
   statement: string;
+  /** Hierarchical lane id e.g. TRA.A.1.a */
+  refId?: string;
 };
+
+/**
+ * WHY lane code: 3 letters from the label (Impact Mapping shorthand).
+ * Collisions get a numeric tail (TR2, TR3…).
+ */
+export function whyLaneCode(label: string, used: Set<string>): string {
+  const cleaned = (label || '')
+    .replace(/^(WHY)\s*[·.•\-–:]?\s*/i, '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  let letters = '';
+  if (words.length >= 3) {
+    letters = words.map(w => w[0] ?? '').join('');
+  } else if (words.length === 2) {
+    letters = `${words[0].slice(0, 2)}${words[1][0] ?? ''}`;
+  } else {
+    letters = (words[0] ?? 'XXX').replace(/[^a-zA-Z]/gi, '');
+  }
+  const base = letters.toUpperCase().slice(0, 3).padEnd(3, 'X');
+  let out = base;
+  let n = 2;
+  while (used.has(out)) {
+    const suffix = String(n++);
+    out = `${base.slice(0, Math.max(1, 3 - suffix.length))}${suffix}`;
+  }
+  used.add(out);
+  return out;
+}
+
+/** 0→A, 25→Z, 26→AA */
+export function upperIndex(i: number): string {
+  let n = i;
+  let s = '';
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
+export function lowerIndex(i: number): string {
+  return upperIndex(i).toLowerCase();
+}
+
+/**
+ * Assign Impact Mapping refs:
+ * WHY=TRA · WHO=TRA.A · HOW=TRA.A.1 · WHAT=TRA.A.1.a · scenario=….S1 · HITL=….Q
+ * HOW/WHAT nest under WHO/HOW by index when the registry only parents to WHY.
+ */
+export function assignMethodologyRefs(
+  tree: RegistryTree | null
+): Map<string, string> {
+  const refs = new Map<string, string>();
+  const artifacts = (tree?.artifacts ?? []).filter(Boolean);
+  const usedCodes = new Set<string>();
+  const byParent = new Map<string, typeof artifacts>();
+  for (const a of artifacts) {
+    if (!a.parent_id) continue;
+    const list = byParent.get(String(a.parent_id)) ?? [];
+    list.push(a);
+    byParent.set(String(a.parent_id), list);
+  }
+  const artifactById = new Map(
+    artifacts.filter(a => a.id).map(a => [String(a.id), a])
+  );
+  const whys = artifacts.filter(a => a.kind === 'why');
+
+  for (const why of whys) {
+    const code = whyLaneCode(why.body?.label || why.external_id, usedCodes);
+    const whyExt = normalizeExtId(why.external_id);
+    refs.set(whyExt, code);
+
+    const kids = why.id ? (byParent.get(String(why.id)) ?? []) : [];
+    const whos = kids.filter(c => c.kind === 'who');
+    const hows = kids.filter(c => c.kind === 'how');
+    const whats = kids.filter(c => c.kind === 'what');
+
+    const whoRefs: string[] = [];
+    whos.forEach((w, i) => {
+      const id = `${code}.${upperIndex(i)}`;
+      refs.set(normalizeExtId(w.external_id), id);
+      whoRefs.push(id);
+    });
+    if (whoRefs.length === 0 && (hows.length > 0 || whats.length > 0)) {
+      whoRefs.push(`${code}.A`);
+    }
+
+    const howCount = new Map<string, number>();
+    const howRefs: string[] = [];
+    hows.forEach((h, j) => {
+      const whoRef = whoRefs[Math.min(j, whoRefs.length - 1)] ?? `${code}.A`;
+      const n = (howCount.get(whoRef) ?? 0) + 1;
+      howCount.set(whoRef, n);
+      const id = `${whoRef}.${n}`;
+      refs.set(normalizeExtId(h.external_id), id);
+      howRefs.push(id);
+    });
+    if (howRefs.length === 0 && whats.length > 0) {
+      howRefs.push(`${whoRefs[0] ?? `${code}.A`}.1`);
+    }
+
+    const whatCount = new Map<string, number>();
+    whats.forEach((w, k) => {
+      const howRef =
+        howRefs[Math.min(k, howRefs.length - 1)] ??
+        `${whoRefs[0] ?? `${code}.A`}.1`;
+      const n = (whatCount.get(howRef) ?? 0) + 1;
+      whatCount.set(howRef, n);
+      const id = `${howRef}.${lowerIndex(n - 1)}`;
+      refs.set(normalizeExtId(w.external_id), id);
+    });
+
+    if (why.body?.needs_human && why.body?.question) {
+      refs.set(`q-${whyExt}`, `${code}.Q`);
+    }
+    for (const kid of [...whos, ...hows, ...whats]) {
+      if (kid.body?.needs_human && kid.body?.question) {
+        const parentRef = refs.get(normalizeExtId(kid.external_id));
+        if (parentRef) {
+          refs.set(`q-${normalizeExtId(kid.external_id)}`, `${parentRef}.Q`);
+        }
+      }
+    }
+  }
+
+  const scenCount = new Map<string, number>();
+  for (const sc of artifacts.filter(a => a.kind === 'scenario')) {
+    const parent = sc.parent_id
+      ? artifactById.get(String(sc.parent_id))
+      : undefined;
+    if (!parent) continue;
+    const parentRef = refs.get(normalizeExtId(parent.external_id));
+    if (!parentRef) continue;
+    const n = (scenCount.get(parentRef) ?? 0) + 1;
+    scenCount.set(parentRef, n);
+    refs.set(normalizeExtId(sc.external_id), `${parentRef}.S${n}`);
+  }
+
+  return refs;
+}
+
+export function withRefPrefix(ref: string | undefined, body: string): string {
+  if (!ref) return body;
+  return `${ref}\n${body}`;
+}
 
 /** Pick the option value that matches a canvas/toolbar external id. */
 export function matchFeedbackExternalId(
@@ -45,11 +195,17 @@ export function matchFeedbackExternalId(
 export function buildFeedbackNodes(tree: RegistryTree | null): FeedbackNode[] {
   const nodes: FeedbackNode[] = [];
   const seen = new Set<string>();
+  const refs = assignMethodologyRefs(tree);
   const push = (node: FeedbackNode) => {
     const id = normalizeExtId(node.externalId);
     if (!id || seen.has(id) || id.includes('smoke')) return;
     seen.add(id);
-    nodes.push({ ...node, externalId: id });
+    const refId = node.refId ?? refs.get(id);
+    const label =
+      refId && !node.label.startsWith(refId)
+        ? `${refId} · ${node.label}`
+        : node.label;
+    nodes.push({ ...node, externalId: id, refId, label });
   };
 
   for (const a of tree?.actors ?? []) {
@@ -233,6 +389,8 @@ export function frameworkMarkdownFromTree(
 
   const memberOf = new Map<string, string[]>();
   const playsRole = new Map<string, string>();
+  /** personExt → managerExt (reports_to) */
+  const reportsTo = new Map<string, string>();
   for (const e of edges) {
     const from = e.from_id ? byUuid.get(String(e.from_id)) : undefined;
     const to = e.to_id ? byUuid.get(String(e.to_id)) : undefined;
@@ -250,6 +408,13 @@ export function frameworkMarkdownFromTree(
       from.kind === 'person'
     ) {
       playsRole.set(fe, to.name);
+    }
+    if (
+      e.rel === 'reports_to' &&
+      from.kind === 'person' &&
+      to.kind === 'person'
+    ) {
+      reportsTo.set(fe, te);
     }
   }
 
@@ -298,6 +463,33 @@ export function frameworkMarkdownFromTree(
   lines.push('');
   lines.push('## EQUIPOS');
   lines.push('');
+  lines.push(
+    '_Jerarquía: cada persona indica a quién reporta (`reports_to` del registry)._'
+  );
+  lines.push('');
+
+  const personName = (ext: string) => {
+    const person = actors.find(a => shortId(a.external_id) === ext);
+    return person?.name ?? ext;
+  };
+
+  /** Roots first, then depth along reports_to within the given member set. */
+  const sortByReports = (exts: string[]): string[] => {
+    const set = new Set(exts);
+    const depth = (ext: string, seen = new Set<string>()): number => {
+      if (seen.has(ext)) return 0;
+      seen.add(ext);
+      const mgr = reportsTo.get(ext);
+      if (!mgr || !set.has(mgr)) return 0;
+      return 1 + depth(mgr, seen);
+    };
+    return [...exts].sort((a, b) => {
+      const da = depth(a);
+      const db = depth(b);
+      if (da !== db) return da - db;
+      return personName(a).localeCompare(personName(b), 'es');
+    });
+  };
 
   const personLine = (ext: string) => {
     const person = actors.find(a => shortId(a.external_id) === ext);
@@ -310,6 +502,12 @@ export function frameworkMarkdownFromTree(
     if (typeof person.attrs?.email === 'string' && person.attrs.email) {
       bits.push(String(person.attrs.email));
     }
+    const mgr = reportsTo.get(ext);
+    if (mgr) {
+      bits.push(`reporta a → ${personName(mgr)}`);
+    } else {
+      bits.push('reporta a → _(raíz / sin manager)_');
+    }
     lines.push(`- ${bits.join(' · ')}`);
   };
 
@@ -321,7 +519,7 @@ export function frameworkMarkdownFromTree(
     const te = shortId(team.external_id);
     lines.push(`### ${team.name}`);
     lines.push('');
-    const members = memberOf.get(te) ?? [];
+    const members = sortByReports(memberOf.get(te) ?? []);
     if (members.length === 0) {
       lines.push('- _(sin miembros)_');
     } else {
@@ -332,7 +530,9 @@ export function frameworkMarkdownFromTree(
   if (orphans.length > 0) {
     lines.push('### Sin equipo');
     lines.push('');
-    for (const p of orphans) personLine(shortId(p.external_id));
+    for (const p of sortByReports(orphans.map(o => shortId(o.external_id)))) {
+      personLine(p);
+    }
     lines.push('');
   }
 
@@ -340,10 +540,20 @@ export function frameworkMarkdownFromTree(
   lines.push('');
   lines.push('## Impact map');
   lines.push('');
+  lines.push(
+    '_Refs: WHY=ABC · WHO=ABC.A · HOW=ABC.A.1 · WHAT=ABC.A.1.a · scenario=….S1_'
+  );
+  lines.push('');
 
-  const pushHitl = (body?: { needs_human?: boolean; question?: string }) => {
+  const methRefs = assignMethodologyRefs(tree);
+
+  const pushHitl = (
+    art: NonNullable<RegistryTree['artifacts']>[number],
+    body?: { needs_human?: boolean; question?: string }
+  ) => {
     if (body?.needs_human && body?.question) {
-      lines.push(`- HITL: ${String(body.question)}`);
+      const qRef = methRefs.get(`q-${normalizeExtId(art.external_id)}`);
+      lines.push(`- HITL${qRef ? ` (${qRef})` : ''}: ${String(body.question)}`);
       lines.push('');
     }
   };
@@ -354,14 +564,17 @@ export function frameworkMarkdownFromTree(
     kind: string
   ) => {
     const label = stripLanePrefix(art.body?.label || kind.toUpperCase(), kind);
-    lines.push(`${heading} ${kind.toUpperCase()} — ${label}`);
+    const ref = methRefs.get(normalizeExtId(art.external_id));
+    lines.push(
+      `${heading} ${kind.toUpperCase()} — ${ref ? `${ref} · ` : ''}${label}`
+    );
     lines.push('');
     const statement = String(art.body?.statement ?? '').trim();
     if (statement) {
       lines.push(statement);
       lines.push('');
     }
-    pushHitl(art.body);
+    pushHitl(art, art.body);
   };
 
   const whyList = whys.length > 0 ? whys : [];
@@ -384,7 +597,8 @@ export function frameworkMarkdownFromTree(
       const scens = scenByParent.get(what.external_id) ?? [];
       for (const sc of scens) {
         const scLabel = sc.body?.label || sc.external_id;
-        lines.push(`**Scenario — ${scLabel}**`);
+        const scRef = methRefs.get(normalizeExtId(sc.external_id));
+        lines.push(`**Scenario — ${scRef ? `${scRef} · ` : ''}${scLabel}**`);
         lines.push('');
         const body = String(sc.body?.statement ?? '').trim();
         if (body) {
@@ -407,7 +621,8 @@ export function frameworkMarkdownFromTree(
     lines.push('');
     for (const sc of orphanScens) {
       const scLabel = sc.body?.label || sc.external_id;
-      lines.push(`**Scenario — ${scLabel}**`);
+      const scRef = methRefs.get(normalizeExtId(sc.external_id));
+      lines.push(`**Scenario — ${scRef ? `${scRef} · ` : ''}${scLabel}**`);
       lines.push('');
       const body = String(sc.body?.statement ?? '').trim();
       if (body) {
@@ -878,7 +1093,8 @@ function attrStr(
 export function personCardText(
   name: string,
   attrs: Record<string, unknown> | undefined,
-  roleName?: string
+  roleName?: string,
+  reportsToName?: string
 ): string {
   const title = attrStr(attrs, 'title') || roleName || '';
   const email = attrStr(attrs, 'email');
@@ -889,6 +1105,7 @@ export function personCardText(
   const lines = [
     name,
     title ? `Rol: ${title}` : '',
+    reportsToName ? `Reporta a: ${reportsToName}` : 'Reporta a: — (raíz)',
     given || family
       ? `Nombre: ${[given, family].filter(Boolean).join(' ')}`
       : '',
@@ -1063,6 +1280,7 @@ export function paintPlanFromTree(
 
   const memberOf = new Map<string, string[]>();
   const playsRole = new Map<string, string>();
+  const reportsToName = new Map<string, string>();
   for (const e of edges) {
     const from = e.from_id ? byUuid.get(String(e.from_id)) : undefined;
     const to = e.to_id ? byUuid.get(String(e.to_id)) : undefined;
@@ -1083,6 +1301,9 @@ export function paintPlanFromTree(
     }
     if (e.rel === 'reports_to') {
       connectors.push({ fromExternalId: fe, toExternalId: te });
+      if (from.kind === 'person' && to.kind === 'person') {
+        reportsToName.set(fe, to.name);
+      }
     }
   }
 
@@ -1269,7 +1490,12 @@ export function paintPlanFromTree(
       } else {
         const texts = members.map(person => {
           const pe = shortId(person.external_id);
-          return personCardText(person.name, person.attrs, playsRole.get(pe));
+          return personCardText(
+            person.name,
+            person.attrs,
+            playsRole.get(pe),
+            reportsToName.get(pe)
+          );
         });
         const heights = texts.map(t =>
           cardHeightForText(t, MEMBER_W, MEMBER_H)
@@ -1349,7 +1575,12 @@ export function paintPlanFromTree(
     leftY += TITLE_H + SHAPE_GAP_Y;
     for (const person of orphans) {
       const pe = shortId(person.external_id);
-      const text = personCardText(person.name, person.attrs, playsRole.get(pe));
+      const text = personCardText(
+        person.name,
+        person.attrs,
+        playsRole.get(pe),
+        reportsToName.get(pe)
+      );
       const ph = cardHeightForText(text, MEMBER_W, MEMBER_H);
       shapes.push(
         box(
@@ -1384,9 +1615,11 @@ export function paintPlanFromTree(
     ext: string;
     label: string;
     text: string;
+    refId?: string;
     w: number;
     h: number;
     q?: string;
+    qRefId?: string;
     qw?: number;
     qh?: number;
   };
@@ -1395,9 +1628,11 @@ export function paintPlanFromTree(
   const METH_MAX = 420;
   const WHY_MIN = 200;
   const WHY_MAX = 380;
+  const methRefs = assignMethodologyRefs(tree);
 
   const rows = whyList.map(why => {
     const whyExt = why.external_id;
+    const whyRef = methRefs.get(normalizeExtId(whyExt));
     const children = why.id
       ? (byParent.get(String(why.id)) ?? [])
       : artifacts.filter(
@@ -1409,14 +1644,19 @@ export function paintPlanFromTree(
     const packKids = (kids: typeof artifacts, kind: PaintRole): KidPack[] =>
       kids.map(c => {
         const label = c.body?.label || kind.toUpperCase();
-        const text = methodologyCardText(label, c.body?.statement, kind);
+        const refId = methRefs.get(normalizeExtId(c.external_id));
+        const text = withRefPrefix(
+          refId,
+          methodologyCardText(label, c.body?.statement, kind)
+        );
         const w = cardWidthForText(text, METH_MIN, METH_MAX);
         const h = cardHeightForText(text, w, LANE_CHILD_H);
         const q =
           c.body?.needs_human && c.body?.question
             ? String(c.body.question)
             : undefined;
-        const qText = q ? `❓ ${q}` : undefined;
+        const qRefId = methRefs.get(`q-${normalizeExtId(c.external_id)}`);
+        const qText = q ? withRefPrefix(qRefId, `❓ ${q}`) : undefined;
         const qw = qText
           ? cardWidthForText(qText, METH_MIN, METH_MAX)
           : undefined;
@@ -1427,24 +1667,31 @@ export function paintPlanFromTree(
           ext: c.external_id,
           label,
           text,
+          refId,
           w: Math.max(w, qw ?? 0),
           h,
           q,
+          qRefId,
           qw,
           qh,
         };
       });
 
     const whyLabel = why.body?.label || 'Sin título';
-    const whyText = methodologyCardText(whyLabel, why.body?.statement, 'why');
+    const whyText = withRefPrefix(
+      whyRef,
+      methodologyCardText(whyLabel, why.body?.statement, 'why')
+    );
     const whyW = cardWidthForText(whyText, WHY_MIN, WHY_MAX);
     const whyH = cardHeightForText(whyText, whyW, LANE_CHILD_H);
     let whyQW: number | undefined;
     let whyQH: number | undefined;
     let whyQ: string | undefined;
+    let whyQRef: string | undefined;
     if (why.body?.needs_human && why.body?.question) {
       whyQ = String(why.body.question);
-      const qText = `❓ ${whyQ}`;
+      whyQRef = methRefs.get(`q-${normalizeExtId(whyExt)}`);
+      const qText = withRefPrefix(whyQRef, `❓ ${whyQ}`);
       whyQW = cardWidthForText(qText, WHY_MIN, WHY_MAX);
       whyQH = cardHeightForText(qText, whyQW, LANE_CHILD_H);
     }
@@ -1452,11 +1699,13 @@ export function paintPlanFromTree(
     return {
       why,
       whyExt,
+      whyRef,
       whyLabel,
       whyText,
       whyW: Math.max(whyW, whyQW ?? 0),
       whyH,
       whyQ,
+      whyQRef,
       whyQW,
       whyQH,
       who: packKids(
@@ -1479,6 +1728,7 @@ export function paintPlanFromTree(
     ext: string;
     label: string;
     text: string;
+    refId?: string;
     w: number;
     h: number;
     parentExt: string;
@@ -1494,13 +1744,18 @@ export function paintPlanFromTree(
     const parentLabel =
       parent?.body?.label || parent?.external_id || 'sin padre';
     const label = sc.body?.label || sc.external_id;
-    const text = `${methodologyCardText(label, sc.body?.statement, 'scenario')}\n↳ ${parentKind}: ${parentLabel}`;
+    const refId = methRefs.get(normalizeExtId(sc.external_id));
+    const text = withRefPrefix(
+      refId,
+      `${methodologyCardText(label, sc.body?.statement, 'scenario')}\n↳ ${parentKind}: ${parentLabel}`
+    );
     const w = cardWidthForText(text, METH_MIN, METH_MAX);
     const h = cardHeightForText(text, w, LANE_CHILD_H);
     const pack: ScenPack = {
       ext: sc.external_id,
       label,
       text,
+      refId,
       w,
       h,
       parentExt,
@@ -1592,7 +1847,10 @@ export function paintPlanFromTree(
             text: kid.text,
             fillColor: fill,
             strokeStyle: 'dash',
-            attrs: { statement: kid.text },
+            attrs: {
+              statement: kid.text,
+              ...(kid.refId ? { refId: kid.refId } : {}),
+            },
           },
           colX,
           cy,
@@ -1605,16 +1863,20 @@ export function paintPlanFromTree(
       if (kid.q && kid.qh) {
         const qExt = `q-${kid.ext}`;
         const qW = Math.min(colW, kid.qw ?? cardW);
+        const qText = withRefPrefix(kid.qRefId, `❓ ${kid.q}`);
         shapes.push(
           box(
             {
               role: 'question',
               externalId: qExt,
               name: 'Pregunta HITL',
-              text: `❓ ${kid.q}`,
+              text: qText,
               fillColor: COLOR_Q,
               strokeStyle: 'solid',
-              attrs: { question: kid.q },
+              attrs: {
+                question: kid.q,
+                ...(kid.qRefId ? { refId: kid.qRefId } : {}),
+              },
             },
             colX,
             cy,
@@ -1670,7 +1932,10 @@ export function paintPlanFromTree(
           text: row.whyText,
           fillColor: laneFill('why'),
           strokeStyle: 'dash',
-          attrs: { statement: String(row.why.body?.statement ?? '') },
+          attrs: {
+            statement: String(row.why.body?.statement ?? ''),
+            ...(row.whyRef ? { refId: row.whyRef } : {}),
+          },
         },
         whyX,
         rowY,
@@ -1686,10 +1951,13 @@ export function paintPlanFromTree(
             role: 'question',
             externalId: qExt,
             name: 'Pregunta HITL',
-            text: `❓ ${row.whyQ}`,
+            text: withRefPrefix(row.whyQRef, `❓ ${row.whyQ}`),
             fillColor: COLOR_Q,
             strokeStyle: 'solid',
-            attrs: { question: row.whyQ },
+            attrs: {
+              question: row.whyQ,
+              ...(row.whyQRef ? { refId: row.whyQRef } : {}),
+            },
           },
           whyX,
           rowY + row.whyH + SHAPE_GAP_Y,

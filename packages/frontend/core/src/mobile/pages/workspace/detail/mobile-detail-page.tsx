@@ -164,7 +164,8 @@ const DetailPageImpl = ({
         server.baseUrl
       ).toString();
 
-      editorContainer.std.clipboard.use(
+      // Guard: some mobile mounts hit onLoad before std is ready.
+      editorContainer.std?.clipboard?.use(
         customImageProxyMiddleware(imageProxyUrl)
       );
       editorContainer.doc

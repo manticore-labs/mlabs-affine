@@ -220,7 +220,8 @@ const BlockSuiteEditorImpl = ({
       server.baseUrl
     ).toString();
 
-    editor.std.clipboard.use(customImageProxyMiddleware(imageProxyUrl));
+    // Mobile / early mount: std may be undefined briefly — never crash the canvas.
+    editor.std?.clipboard?.use(customImageProxyMiddleware(imageProxyUrl));
     page.get(ImageProxyService).setImageProxyURL(imageProxyUrl);
 
     editor.updateComplete

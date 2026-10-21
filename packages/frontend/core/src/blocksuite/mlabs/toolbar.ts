@@ -40,31 +40,36 @@ export function mlabsSurfaceToolbarConfig(): ToolbarModuleConfig {
         id: 'A.mlabs.feedback',
         score: -2,
         when(ctx) {
-          const models = ctx.getSurfaceModels();
-          return models.length > 0 && !models.some(m => m.isLocked?.());
+          try {
+            return ctx.getSurfaceModels().length > 0;
+          } catch {
+            return false;
+          }
         },
         content: ctx => {
-          const onClick = (event: Event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const models = ctx.getSurfaceModels();
-            const initialFeedbackId = readSelectedExternalId(models);
-            const store = ctx.host.store;
-            openDifySourcesPanel({
-              pageId: store.id,
-              pageUrl: globalThis.location?.href,
-              doc: store.spaceDoc,
-              store,
-              initialTab: 'pintar',
-              focusFeedback: true,
-              initialFeedbackId,
-            });
+          const onClick = () => {
+            try {
+              const models = ctx.getSurfaceModels();
+              const initialFeedbackId = readSelectedExternalId(models);
+              const store = ctx.host.store;
+              openDifySourcesPanel({
+                pageId: store.id,
+                pageUrl: globalThis.location?.href,
+                doc: store.spaceDoc,
+                store,
+                initialTab: 'pintar',
+                focusFeedback: true,
+                initialFeedbackId,
+              });
+            } catch (err) {
+              console.error('mlabs feedback toolbar', err);
+            }
           };
           return html`
             <icon-button
               size="28px"
               data-testid="mlabs-feedback-toolbar"
-              title="💬 Comentario Mlabs — enviar nodo a Dify"
+              title="💬 Comentario Mlabs"
               style="min-width:110px;padding:0 8px;gap:4px"
               @click=${onClick}
             >

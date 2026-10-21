@@ -22,18 +22,14 @@ export class MlabsViewExtension extends ViewExtensionProvider {
     context.register(MlabsSlashMenuConfigExtension());
 
     if (context.scope === 'edgeless') {
-      const feedbackToolbar = mlabsSurfaceToolbarConfig();
-      context.register([
+      // Only custom:affine:surface:* — do NOT also register surface:shape;
+      // a second registration crashed mobile (std.clipboard undefined).
+      context.register(
         ToolbarModuleExtension({
           id: BlockFlavourIdentifier('custom:affine:surface:*'),
-          config: feedbackToolbar,
-        }),
-        // Explicit shape flavour so 💬 shows when a rect/card is selected.
-        ToolbarModuleExtension({
-          id: BlockFlavourIdentifier('custom:affine:surface:shape'),
-          config: feedbackToolbar,
-        }),
-      ]);
+          config: mlabsSurfaceToolbarConfig(),
+        })
+      );
     }
   }
 }

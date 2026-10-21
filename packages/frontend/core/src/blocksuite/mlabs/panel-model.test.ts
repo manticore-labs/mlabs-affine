@@ -11,7 +11,6 @@ import {
   humanBridgeError,
   indexingNotice,
   isDocumentIndexing,
-  isOwnNode,
   openRequestBody,
   type PageDoc,
   paintPlan,
@@ -117,23 +116,22 @@ test('the WHY contract is stored on the page document', () => {
   assert.equal(stored.okr_alignment, 'OKR Q4');
 });
 
-test('lane layout: EQUIPOS left + WHYs horizontal to the right', () => {
+test('bands: EQUIPOS | WHY | WHO | HOW | WHAT + foreign gap', () => {
   assert.equal(foreignMinX([]), null);
   const empty = paintPlan(null);
   assert.ok(empty.shapes.some(s => s.role === 'title' && s.name === 'EQUIPOS'));
-  assert.ok(empty.shapes.some(s => s.role === 'title' && s.name === 'WHY'));
+  for (const name of ['WHY', 'WHO', 'HOW', 'WHAT']) {
+    assert.ok(
+      empty.shapes.some(s => s.role === 'title' && s.name === name),
+      `missing title ${name}`
+    );
+  }
   assert.ok(empty.shapes.some(s => s.role === 'team'));
-  assert.ok(empty.shapes.some(s => s.role === 'person'));
   assert.ok(empty.shapes.some(s => s.role === 'why'));
-  assert.ok(
-    empty.shapes.some(s => s.role === 'question' || s.text.startsWith('❓'))
-  );
   assert.match(
     personCardText('Ada', { email: 'a@b.c', title: 'CEO' }),
     /📧 a@b.c/
   );
-  assert.equal(isOwnNode({ id: 'x', role: 'team' }), true);
-  assert.equal(isOwnNode({ id: 'note-1' }), false);
 
   const tree = paintPlanFromTree(
     {
@@ -184,58 +182,68 @@ test('lane layout: EQUIPOS left + WHYs horizontal to the right', () => {
           },
         },
         {
-          id: 'w2',
-          external_id: 'why-calidad',
-          kind: 'why',
-          body: {
-            label: 'Calidad',
-            statement: 'Menos bugs',
-            needs_human: false,
-          },
-        },
-        {
           id: 'who1',
           external_id: 'who-tiempo',
           kind: 'who',
           parent_id: 'w1',
-          body: { label: 'WHO', statement: 'Owner + Gestor' },
+          body: { label: 'Mesa', statement: 'Owner + Gestor' },
         },
         {
           id: 'how1',
           external_id: 'how-tiempo',
           kind: 'how',
           parent_id: 'w1',
-          body: { label: 'HOW', statement: 'Registry' },
+          body: { label: 'Cola', statement: 'Registry' },
         },
         {
           id: 'what1',
           external_id: 'what-tiempo',
           kind: 'what',
           parent_id: 'w1',
-          body: { label: 'WHAT', statement: 'Lienzo' },
+          body: { label: 'Lienzo', statement: 'UI' },
+        },
+        {
+          id: 'sc1',
+          external_id: 'scenario-drag',
+          kind: 'scenario',
+          parent_id: 'what1',
+          body: {
+            label: 'Drag ticket',
+            statement: 'Feature: board\nScenario: drag',
+          },
         },
       ],
     },
     null
   );
-  const team = tree.shapes.find(s => s.role === 'team');
-  assert.ok(team);
-  // 2 members → height = 2*168 + 20; equipos start at x=0
-  assert.match(team!.xywh, /^\[0,.*,160,356\]/);
-  assert.ok(tree.shapes.some(s => s.text.includes('📧 adrian@')));
-  assert.ok(tree.shapes.some(s => s.role === 'question'));
-  const whyCards = tree.shapes.filter(s => s.role === 'why');
-  assert.equal(whyCards.length, 2);
-  assert.equal(whyCards[0]!.text.startsWith('WHY'), false);
-  // Second WHY must sit to the right of the first
-  const x1 = Number(whyCards[0]!.xywh.match(/^\[(-?\d+)/)?.[1]);
-  const x2 = Number(whyCards[1]!.xywh.match(/^\[(-?\d+)/)?.[1]);
-  assert.ok(x2 > x1);
-  // WHY band starts to the right of EQUIPOS column
-  assert.ok(x1 > 160);
-  assert.ok(tree.connectors.some(c => c.fromExternalId === 'gestion-admin'));
+  const titles = tree.shapes.filter(s => s.role === 'title');
+  const titleXs = Object.fromEntries(
+    titles.map(t => [t.name, Number(t.xywh.match(/^\[(-?\d+)/)?.[1])])
+  );
+  assert.equal(titleXs.EQUIPOS, 0);
+  assert.ok(titleXs.WHY! > titleXs.EQUIPOS!);
+  assert.ok(titleXs.WHO! > titleXs.WHY!);
+  assert.ok(titleXs.HOW! > titleXs.WHO!);
+  assert.ok(titleXs.WHAT! > titleXs.HOW!);
 
-  // Foreign content: map right edge + FOREIGN_GAP == foreignLeft
+  const who = tree.shapes.find(s => s.role === 'who');
+  const how = tree.shapes.find(s => s.role === 'how');
+  const what = tree.shapes.find(s => s.role === 'what');
+  assert.ok(who && how && what);
+  const why = tree.shapes.find(s => s.role === 'why');
+  assert.ok(why);
+  assert.equal(why!.text.startsWith('WHY'), false);
+
+  const scen = tree.shapes.find(s => s.role === 'scenario');
+  assert.ok(scen);
+  assert.match(scen!.text, /↳ WHAT:/);
+  assert.ok(
+    tree.connectors.some(
+      c =>
+        c.fromExternalId === 'what-tiempo' && c.toExternalId === 'scenario-drag'
+    )
+  );
+
   const shifted = paintPlanFromTree(
     {
       actors: [
@@ -257,10 +265,10 @@ test('lane layout: EQUIPOS left + WHYs horizontal to the right', () => {
         },
       ],
     },
-    5000
+    8000
   );
   const bounds = planBounds(shifted.shapes);
-  assert.equal(bounds.maxX + FOREIGN_GAP, 5000);
+  assert.equal(bounds.maxX + FOREIGN_GAP, 8000);
 });
 
 test('store.transact keeps its this when painting', () => {

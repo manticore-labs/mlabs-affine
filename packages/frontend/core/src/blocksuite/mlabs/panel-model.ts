@@ -6,6 +6,13 @@ export function normalizeExtId(id: string): string {
   return id.replace(/^mlabs:/, '');
 }
 
+export type FeedbackNode = {
+  externalId: string;
+  kind: string;
+  label: string;
+  statement: string;
+};
+
 /** Pick the option value that matches a canvas/toolbar external id. */
 export function matchFeedbackExternalId(
   nodes: Array<{ externalId: string }>,
@@ -20,7 +27,58 @@ export function matchFeedbackExternalId(
       n.externalId === want ||
       `mlabs:${normalizeExtId(n.externalId)}` === wanted
   );
-  return hit?.externalId;
+  if (hit) return hit.externalId;
+  // Canvas HITL cards use q-<parentExt>; fall back to the parent artifact/actor.
+  if (want.startsWith('q-')) {
+    const parent = want.slice(2);
+    if (parent) {
+      return matchFeedbackExternalId(nodes, parent);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Dropdown options for 💬 feedback: actors + artifacts + HITL question cards
+ * (canvas paints those as q-<parentExt> — they must appear in the select).
+ */
+export function buildFeedbackNodes(tree: RegistryTree | null): FeedbackNode[] {
+  const nodes: FeedbackNode[] = [];
+  const seen = new Set<string>();
+  const push = (node: FeedbackNode) => {
+    const id = normalizeExtId(node.externalId);
+    if (!id || seen.has(id) || id.includes('smoke')) return;
+    seen.add(id);
+    nodes.push({ ...node, externalId: id });
+  };
+
+  for (const a of tree?.actors ?? []) {
+    push({
+      externalId: a.external_id,
+      kind: a.kind,
+      label: a.name,
+      statement: '',
+    });
+  }
+  for (const art of tree?.artifacts ?? []) {
+    const ext = art.external_id;
+    push({
+      externalId: ext,
+      kind: art.kind,
+      label: art.body?.label || art.kind.toUpperCase(),
+      statement: String(art.body?.statement ?? ''),
+    });
+    if (art.body?.needs_human && art.body?.question) {
+      const q = String(art.body.question);
+      push({
+        externalId: `q-${normalizeExtId(ext)}`,
+        kind: 'question',
+        label: q,
+        statement: q,
+      });
+    }
+  }
+  return nodes;
 }
 
 const ALLOWED_EXTENSIONS = new Set([

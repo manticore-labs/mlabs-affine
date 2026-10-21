@@ -43,3 +43,18 @@ test('readSelectedExternalId returns undefined when missing', () => {
   assert.equal(readSelectedExternalId([{ yMap: doc.getMap('el') }]), undefined);
   assert.equal(readSelectedExternalId([]), undefined);
 });
+
+test('readSelectedExternalId reads HITL q-* cards', () => {
+  assert.equal(
+    readSelectedExternalId([
+      {
+        mlabsAttrs: {
+          externalId: 'q-what-toc',
+          role: 'question',
+          question: '¿TOC filtrada?',
+        },
+      },
+    ]),
+    'q-what-toc'
+  );
+});

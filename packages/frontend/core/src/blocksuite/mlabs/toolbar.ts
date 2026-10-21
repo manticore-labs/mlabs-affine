@@ -7,6 +7,13 @@ import { html } from 'lit';
 import { openDifySourcesPanel } from './panel';
 import { readSelectedExternalId } from './toolbar-attrs';
 
+/**
+ * Sticky id across toolbar re-renders. On mobile, tapping the button clears
+ * selection and re-runs content() with an empty selection before click fires —
+ * a per-render capturedId is wiped; this module-level latch is not.
+ */
+let stickyFeedbackId: string | undefined;
+
 /** Edgeless surface toolbar: 💬 mlabs on selected shape (mid-toolbar). */
 export function mlabsSurfaceToolbarConfig(): ToolbarModuleConfig {
   return {
@@ -24,11 +31,16 @@ export function mlabsSurfaceToolbarConfig(): ToolbarModuleConfig {
           }
         },
         content: ctx => {
-          // Capture at render time — on mobile the tap clears selection before click.
-          const capturedId = readSelectedExternalId(ctx.getSurfaceModels());
+          const selectedId = readSelectedExternalId(ctx.getSurfaceModels());
+          if (selectedId) stickyFeedbackId = selectedId;
           const store = ctx.host.store;
+          const latchId = () => {
+            const now = readSelectedExternalId(ctx.getSurfaceModels());
+            if (now) stickyFeedbackId = now;
+          };
           const onClick = () => {
             try {
+              latchId();
               const liveId = readSelectedExternalId(ctx.getSurfaceModels());
               openDifySourcesPanel({
                 pageId: store.id,
@@ -37,7 +49,8 @@ export function mlabsSurfaceToolbarConfig(): ToolbarModuleConfig {
                 store,
                 initialTab: 'pintar',
                 focusFeedback: true,
-                initialFeedbackId: liveId || capturedId,
+                // Prefer sticky: live is often empty after mobile tap clears selection.
+                initialFeedbackId: liveId || stickyFeedbackId,
               });
             } catch (err) {
               console.error('mlabs feedback toolbar', err);
@@ -49,6 +62,8 @@ export function mlabsSurfaceToolbarConfig(): ToolbarModuleConfig {
               data-testid="mlabs-feedback-toolbar"
               title="💬 mlabs"
               style="min-width:72px;padding:0 8px;gap:4px"
+              @pointerdown=${latchId}
+              @touchstart=${latchId}
               @click=${onClick}
             >
               <span style="font-size:15px;line-height:1">💬</span>

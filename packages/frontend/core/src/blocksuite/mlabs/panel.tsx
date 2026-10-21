@@ -5,6 +5,7 @@ import * as Y from 'yjs';
 
 import * as styles from './panel.css';
 import {
+  buildFeedbackNodes,
   type CanvasNode,
   changeLabel,
   foreignMinX,
@@ -12,7 +13,6 @@ import {
   indexingNotice,
   isOwnNode,
   matchFeedbackExternalId,
-  normalizeExtId,
   openRequestBody,
   type PageDoc,
   paintPlanFromTree,
@@ -413,39 +413,12 @@ export function DifySourcesPanel({
     const loadFeedbackNodes = async () => {
       try {
         const tree = await fetchRegistryTree(fetchImpl);
-        const nodes: Array<{
-          externalId: string;
-          kind: string;
-          label: string;
-          statement: string;
-        }> = [];
-        for (const a of tree?.actors ?? []) {
-          if (a.external_id.includes('smoke')) continue;
-          nodes.push({
-            externalId: normalizeExtId(a.external_id),
-            kind: a.kind,
-            label: a.name,
-            statement: '',
-          });
-        }
-        for (const art of tree?.artifacts ?? []) {
-          nodes.push({
-            externalId: normalizeExtId(art.external_id),
-            kind: art.kind,
-            label: art.body?.label || art.kind.toUpperCase(),
-            statement: String(art.body?.statement ?? ''),
-          });
-        }
+        const nodes = buildFeedbackNodes(tree);
         setFeedbackNodes(nodes);
-        // Prefer the card selected on the canvas; only fall back if none matched.
-        const preferred =
-          matchFeedbackExternalId(nodes, initialFeedbackId) ||
-          (initialFeedbackId ? undefined : nodes[0]?.externalId);
+        // Prefer the card selected on the canvas; never invent the first person.
+        const preferred = matchFeedbackExternalId(nodes, initialFeedbackId);
         if (preferred) setFeedbackPick(preferred);
-        else if (initialFeedbackId && nodes[0]) {
-          // Had a selection but id not in list — leave blank so UI doesn't lie.
-          setFeedbackPick('');
-        }
+        else setFeedbackPick('');
       } catch {
         /* feedback list is best-effort; user can retry via select focus */
       }
@@ -883,51 +856,28 @@ export function DifySourcesPanel({
                         if (feedbackNodes.length > 0) return;
                         run('No pude cargar nodos.', async () => {
                           const tree = await fetchRegistryTree(fetchImpl);
-                          const nodes: Array<{
-                            externalId: string;
-                            kind: string;
-                            label: string;
-                            statement: string;
-                          }> = [];
-                          for (const a of tree?.actors ?? []) {
-                            if (a.external_id.includes('smoke')) continue;
-                            nodes.push({
-                              externalId: normalizeExtId(a.external_id),
-                              kind: a.kind,
-                              label: a.name,
-                              statement: '',
-                            });
-                          }
-                          for (const art of tree?.artifacts ?? []) {
-                            nodes.push({
-                              externalId: normalizeExtId(art.external_id),
-                              kind: art.kind,
-                              label: art.body?.label || art.kind.toUpperCase(),
-                              statement: String(art.body?.statement ?? ''),
-                            });
-                          }
+                          const nodes = buildFeedbackNodes(tree);
                           setFeedbackNodes(nodes);
                           const preferred =
                             matchFeedbackExternalId(nodes, initialFeedbackId) ||
                             matchFeedbackExternalId(nodes, feedbackPick);
                           if (preferred) setFeedbackPick(preferred);
-                          else if (nodes[0] && !feedbackPick) {
-                            setFeedbackPick(nodes[0].externalId);
-                          }
+                          else setFeedbackPick('');
                         }).catch(() => {
                           /* run() already notifies */
                         });
                       }}
                     >
-                      {feedbackNodes.length === 0 ? (
-                        <option value="">Cargá el listado (click aquí)</option>
-                      ) : (
-                        feedbackNodes.map(node => (
-                          <option key={node.externalId} value={node.externalId}>
-                            [{node.kind}] {node.label}
-                          </option>
-                        ))
-                      )}
+                      <option value="">
+                        {feedbackNodes.length === 0
+                          ? 'Cargá el listado (click aquí)'
+                          : '— elegí nodo —'}
+                      </option>
+                      {feedbackNodes.map(node => (
+                        <option key={node.externalId} value={node.externalId}>
+                          [{node.kind}] {node.label}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <label className={styles.field}>

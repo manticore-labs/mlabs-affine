@@ -101,6 +101,10 @@ const ALLOWED_EXTENSIONS = new Set([
 const DATASET_LINK = 'mlabs';
 const DATASET_KEY = 'dify_dataset_id';
 const WHY_KEY = 'why';
+const DOC_SYNC_NOTE_KEY = 'doc_sync_note_id';
+
+/** H1 title of the Pintar-synced page note (export MD). */
+export const DOC_SYNC_TITLE = 'Mlabs Framework';
 
 export type WhyIndicator = 'leading' | 'lagging';
 
@@ -188,6 +192,303 @@ export function writeWhy(doc: PageDoc, draft: WhyDraft) {
   const apply = () => doc.getMap(DATASET_LINK).set(WHY_KEY, payload);
   if (doc.transact) doc.transact(apply);
   else apply();
+}
+
+export function readDocSyncNoteId(
+  doc: PageDoc | undefined
+): string | undefined {
+  if (!doc) return undefined;
+  const value = doc.getMap(DATASET_LINK).get(DOC_SYNC_NOTE_KEY);
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+export function writeDocSyncNoteId(doc: PageDoc, noteId: string) {
+  const apply = () => doc.getMap(DATASET_LINK).set(DOC_SYNC_NOTE_KEY, noteId);
+  if (doc.transact) doc.transact(apply);
+  else apply();
+}
+
+function stripLanePrefix(label: string, kind: string): string {
+  const re = new RegExp(`^(${kind})\\s*[·.•\\-–:]?\\s*`, 'i');
+  return label.replace(re, '').trim() || label;
+}
+
+/**
+ * Markdown outline for the page note synced on Pintar.
+ * Impact Mapping + BDD Z4 — same lanes as the canvas; exportable via Affine MD.
+ */
+export function frameworkMarkdownFromTree(
+  tree: RegistryTree | null,
+  opts?: { generatedAt?: string }
+): string {
+  const actors = (tree?.actors ?? []).filter(
+    a => !a.external_id.includes('smoke')
+  );
+  const edges = tree?.edges ?? [];
+  const artifacts = (tree?.artifacts ?? []).filter(Boolean);
+  const byUuid = new Map(actors.filter(a => a.id).map(a => [String(a.id), a]));
+  const artifactById = new Map(
+    artifacts.filter(a => a.id).map(a => [String(a.id), a])
+  );
+
+  const memberOf = new Map<string, string[]>();
+  const playsRole = new Map<string, string>();
+  for (const e of edges) {
+    const from = e.from_id ? byUuid.get(String(e.from_id)) : undefined;
+    const to = e.to_id ? byUuid.get(String(e.to_id)) : undefined;
+    if (!from || !to) continue;
+    const fe = shortId(from.external_id);
+    const te = shortId(to.external_id);
+    if (e.rel === 'member_of' && to.kind === 'team' && from.kind === 'person') {
+      const list = memberOf.get(te) ?? [];
+      list.push(fe);
+      memberOf.set(te, list);
+    }
+    if (
+      e.rel === 'plays_role' &&
+      to.kind === 'role' &&
+      from.kind === 'person'
+    ) {
+      playsRole.set(fe, to.name);
+    }
+  }
+
+  const teams = actors
+    .filter(a => a.kind === 'team')
+    .sort((a, b) => {
+      const ha = Number(a.attrs?.hierarchy ?? 99);
+      const hb = Number(b.attrs?.hierarchy ?? 99);
+      return ha - hb || a.name.localeCompare(b.name, 'es');
+    });
+
+  const memberPersonExts = new Set<string>();
+  for (const list of memberOf.values()) {
+    for (const ext of list) memberPersonExts.add(ext);
+  }
+  const orphans = actors.filter(
+    a => a.kind === 'person' && !memberPersonExts.has(shortId(a.external_id))
+  );
+
+  const whys = artifacts.filter(a => a.kind === 'why');
+  const byParent = new Map<string, typeof artifacts>();
+  for (const a of artifacts) {
+    if (!a.parent_id) continue;
+    const list = byParent.get(String(a.parent_id)) ?? [];
+    list.push(a);
+    byParent.set(String(a.parent_id), list);
+  }
+  const scenarios = artifacts.filter(a => a.kind === 'scenario');
+  const scenByParent = new Map<string, typeof scenarios>();
+  for (const sc of scenarios) {
+    const parent = sc.parent_id
+      ? artifactById.get(String(sc.parent_id))
+      : undefined;
+    const key = parent?.external_id ?? '';
+    if (!key) continue;
+    const list = scenByParent.get(key) ?? [];
+    list.push(sc);
+    scenByParent.set(key, list);
+  }
+
+  const lines: string[] = [];
+  const stamp = opts?.generatedAt ?? new Date().toISOString();
+  lines.push(`# ${DOC_SYNC_TITLE}`);
+  lines.push('');
+  lines.push(`_Generado por Pintar · ${stamp}_`);
+  lines.push('');
+  lines.push('## EQUIPOS');
+  lines.push('');
+
+  const personLine = (ext: string) => {
+    const person = actors.find(a => shortId(a.external_id) === ext);
+    if (!person) return;
+    const role =
+      playsRole.get(ext) ||
+      (typeof person.attrs?.title === 'string' ? person.attrs.title : '') ||
+      'sin rol';
+    const bits = [`${person.name} — ${role}`];
+    if (typeof person.attrs?.email === 'string' && person.attrs.email) {
+      bits.push(String(person.attrs.email));
+    }
+    lines.push(`- ${bits.join(' · ')}`);
+  };
+
+  if (teams.length === 0 && orphans.length === 0) {
+    lines.push('_Sin equipos en el registry._');
+    lines.push('');
+  }
+  for (const team of teams) {
+    const te = shortId(team.external_id);
+    lines.push(`### ${team.name}`);
+    lines.push('');
+    const members = memberOf.get(te) ?? [];
+    if (members.length === 0) {
+      lines.push('- _(sin miembros)_');
+    } else {
+      for (const ext of members) personLine(ext);
+    }
+    lines.push('');
+  }
+  if (orphans.length > 0) {
+    lines.push('### Sin equipo');
+    lines.push('');
+    for (const p of orphans) personLine(shortId(p.external_id));
+    lines.push('');
+  }
+
+  lines.push('---');
+  lines.push('');
+  lines.push('## Impact map');
+  lines.push('');
+
+  const pushHitl = (body?: { needs_human?: boolean; question?: string }) => {
+    if (body?.needs_human && body?.question) {
+      lines.push(`- HITL: ${String(body.question)}`);
+      lines.push('');
+    }
+  };
+
+  const pushArtifact = (
+    art: NonNullable<RegistryTree['artifacts']>[number],
+    heading: string,
+    kind: string
+  ) => {
+    const label = stripLanePrefix(art.body?.label || kind.toUpperCase(), kind);
+    lines.push(`${heading} ${kind.toUpperCase()} — ${label}`);
+    lines.push('');
+    const statement = String(art.body?.statement ?? '').trim();
+    if (statement) {
+      lines.push(statement);
+      lines.push('');
+    }
+    pushHitl(art.body);
+  };
+
+  const whyList = whys.length > 0 ? whys : [];
+  if (whyList.length === 0) {
+    lines.push('_Sin artefactos WHY en el registry._');
+    lines.push('');
+  }
+
+  for (const why of whyList) {
+    pushArtifact(why, '###', 'why');
+    const children = why.id ? (byParent.get(String(why.id)) ?? []) : [];
+    for (const who of children.filter(c => c.kind === 'who')) {
+      pushArtifact(who, '####', 'who');
+    }
+    for (const how of children.filter(c => c.kind === 'how')) {
+      pushArtifact(how, '#####', 'how');
+    }
+    for (const what of children.filter(c => c.kind === 'what')) {
+      pushArtifact(what, '######', 'what');
+      const scens = scenByParent.get(what.external_id) ?? [];
+      for (const sc of scens) {
+        const scLabel = sc.body?.label || sc.external_id;
+        lines.push(`**Scenario — ${scLabel}**`);
+        lines.push('');
+        const body = String(sc.body?.statement ?? '').trim();
+        if (body) {
+          lines.push('```gherkin');
+          lines.push(body);
+          lines.push('```');
+          lines.push('');
+        }
+      }
+    }
+  }
+
+  // Orphan scenarios (parent missing / not a what)
+  const linked = new Set(
+    [...scenByParent.values()].flat().map(s => s.external_id)
+  );
+  const orphanScens = scenarios.filter(s => !linked.has(s.external_id));
+  if (orphanScens.length > 0) {
+    lines.push('### SCENARIOS (sin WHAT padre)');
+    lines.push('');
+    for (const sc of orphanScens) {
+      const scLabel = sc.body?.label || sc.external_id;
+      lines.push(`**Scenario — ${scLabel}**`);
+      lines.push('');
+      const body = String(sc.body?.statement ?? '').trim();
+      if (body) {
+        lines.push('```gherkin');
+        lines.push(body);
+        lines.push('```');
+        lines.push('');
+      }
+    }
+  }
+
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/** Intermediate blocks for the doc-sync note (no BlockSuite Text dependency). */
+export type NoteSeed =
+  | { flavour: 'affine:paragraph'; type: string; text: string }
+  | { flavour: 'affine:list'; type: string; text: string }
+  | { flavour: 'affine:divider' }
+  | { flavour: 'affine:code'; language: string; text: string };
+
+/** Parse framework markdown into note seeds (h1–h6, list, hr, fenced code). */
+export function noteSeedsFromMarkdown(markdown: string): NoteSeed[] {
+  const seeds: NoteSeed[] = [];
+  const lines = markdown.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? '';
+    if (line.startsWith('```')) {
+      const language = line.slice(3).trim() || 'text';
+      const body: string[] = [];
+      i += 1;
+      while (i < lines.length && !(lines[i] ?? '').startsWith('```')) {
+        body.push(lines[i] ?? '');
+        i += 1;
+      }
+      seeds.push({
+        flavour: 'affine:code',
+        language,
+        text: body.join('\n'),
+      });
+      i += 1;
+      continue;
+    }
+    if (line.trim() === '---') {
+      seeds.push({ flavour: 'affine:divider' });
+      i += 1;
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      seeds.push({
+        flavour: 'affine:paragraph',
+        type: `h${heading[1].length}`,
+        text: heading[2],
+      });
+      i += 1;
+      continue;
+    }
+    if (line.startsWith('- ')) {
+      seeds.push({
+        flavour: 'affine:list',
+        type: 'bulleted',
+        text: line.slice(2),
+      });
+      i += 1;
+      continue;
+    }
+    if (line.trim().length === 0) {
+      i += 1;
+      continue;
+    }
+    const cleaned = line.replace(/^\*\*(.*)\*\*$/, '$1');
+    seeds.push({
+      flavour: 'affine:paragraph',
+      type: 'text',
+      text: cleaned,
+    });
+    i += 1;
+  }
+  return seeds;
 }
 
 /** Business goal only. People/teams/roles stay in WHO (not this slice). */

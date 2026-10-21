@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Y from 'yjs';
 
+import { isDocSyncNoteId, syncFrameworkDocNote } from './doc-sync';
 import * as styles from './panel.css';
 import {
   buildFeedbackNodes,
@@ -75,7 +76,16 @@ type SurfaceModel = {
 };
 
 type PaintStore = {
+  id?: string;
+  root?: { id: string } | null;
+  spaceDoc?: PageDoc;
   getModelsByFlavour?: (flavour: string) => unknown[];
+  addBlock?: (
+    flavour: string,
+    props: Record<string, unknown>,
+    parentId?: string
+  ) => string;
+  deleteBlock?: (model: unknown) => void;
 };
 
 export type DifySourcesPanelProps = {
@@ -214,11 +224,21 @@ export async function paintPeople(
     throw new Error('Esta página no tiene un lienzo.');
   }
   const surface = surfaces[0];
+  const pageDoc = store?.spaceDoc;
   const notes = (store?.getModelsByFlavour?.('affine:note') ?? []) as Array<{
+    id: string;
     xywh?: string;
+    children?: Array<{
+      id: string;
+      flavour?: string;
+      props?: { type?: string; text?: { toString?: () => string } };
+    }>;
   }>;
   // Foreign = notes + surface elements that are not ours (images, embeds, hand shapes).
-  const foreignXywhs: Array<string | undefined> = notes.map(note => note.xywh);
+  // Skip the Pintar doc-sync note so it never shoves the canvas layout.
+  const foreignXywhs: Array<string | undefined> = notes
+    .filter(note => !isDocSyncNoteId(note.id, pageDoc, notes))
+    .map(note => note.xywh);
   const pushForeignXywh = (raw: unknown) => {
     if (typeof raw === 'string') foreignXywhs.push(raw);
   };
@@ -318,6 +338,14 @@ export async function paintPeople(
       });
     }
   }
+
+  // Page note with methodology outline — Affine Export → Markdown includes it.
+  try {
+    syncFrameworkDocNote(store, tree, pageDoc);
+  } catch (err) {
+    console.error('mlabs doc-sync note', err);
+  }
+
   return shapes.length;
 }
 
@@ -952,10 +980,11 @@ export function DifySourcesPanel({
                 <>
                   <p className={styles.lead}>
                     Pinta el caso desde el registry (equipos + bandas
-                    WHY→WHO→HOW→WHAT→SCENARIOS). Comentario a Dify: seleccioná
-                    una carta en el lienzo → toolbar <code>💬 mlabs</code>, o
-                    slash <code>💬 Comentario Mlabs</code>. El nodo del modal se
-                    preselecciona desde la carta (también en mobile).
+                    WHY→WHO→HOW→WHAT→SCENARIOS). También escribe/actualiza la
+                    nota de página <code>Mlabs Framework</code> (modo documento)
+                    para Export → Markdown. Comentario a Dify: carta → toolbar{' '}
+                    <code>💬 mlabs</code>, o slash{' '}
+                    <code>💬 Comentario Mlabs</code>.
                   </p>
                   <div className={styles.actions}>
                     <Button
@@ -967,7 +996,7 @@ export function DifySourcesPanel({
                           const count = await paintPeople(store, fetchImpl);
                           notify.success({
                             title: 'Mlabs Framework',
-                            message: `Pintados ${count} nodos del árbol.`,
+                            message: `Pintados ${count} nodos + nota documento sincronizada.`,
                           });
                         })
                       }

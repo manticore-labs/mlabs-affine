@@ -243,6 +243,34 @@ test('bands: EQUIPOS | WHY | WHO | HOW | WHAT + foreign gap', () => {
         c.fromExternalId === 'what-tiempo' && c.toExternalId === 'scenario-drag'
     )
   );
+  // Impact Mapping chain: WHY→WHO→HOW→WHAT (not WHY→HOW/WHAT)
+  assert.ok(
+    tree.connectors.some(
+      c => c.fromExternalId === 'why-tiempo' && c.toExternalId === 'who-tiempo'
+    )
+  );
+  assert.ok(
+    tree.connectors.some(
+      c => c.fromExternalId === 'who-tiempo' && c.toExternalId === 'how-tiempo'
+    )
+  );
+  assert.ok(
+    tree.connectors.some(
+      c => c.fromExternalId === 'how-tiempo' && c.toExternalId === 'what-tiempo'
+    )
+  );
+  assert.equal(
+    tree.connectors.some(
+      c => c.fromExternalId === 'why-tiempo' && c.toExternalId === 'how-tiempo'
+    ),
+    false
+  );
+  const whyFill = tree.shapes.find(s => s.role === 'why')?.fillColor;
+  const whoFill = tree.shapes.find(s => s.role === 'who')?.fillColor;
+  const howFill = tree.shapes.find(s => s.role === 'how')?.fillColor;
+  const whatFill = tree.shapes.find(s => s.role === 'what')?.fillColor;
+  assert.ok(whyFill && whoFill && howFill && whatFill);
+  assert.equal(new Set([whyFill, whoFill, howFill, whatFill]).size, 4);
 
   const shifted = paintPlanFromTree(
     {

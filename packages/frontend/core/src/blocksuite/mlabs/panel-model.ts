@@ -335,11 +335,17 @@ export type RegistryTree = {
 };
 
 const COLOR_OK = '#3cbc36';
-const COLOR_PROPOSED = '#e6b422';
+/** Legacy amber — prefer laneFill() for methodology cards. */
+const COLOR_PROPOSED = '#e8b84a';
 const COLOR_TITLE = '#2a2a2a';
 const COLOR_TEAM = '#1f6f4a';
 const COLOR_Q = '#c45c26';
-const COLOR_SCENARIO = '#6b5b95';
+/** Impact Mapping lanes — light fills, dark text (distinct + accessible). */
+const COLOR_WHY = '#e8b84a'; // gold — business goal
+const COLOR_WHO = '#6ba3d4'; // blue — actors
+const COLOR_HOW = '#5fb89a'; // teal — activities (≠ team green)
+const COLOR_WHAT = '#b08fd4'; // lavender — deliverables
+const COLOR_SCENARIO = '#6b5b95'; // deeper purple — BDD under WHAT
 
 export function shapeCaption(label: string, statement?: string): string {
   const body = (statement ?? '').trim();
@@ -379,19 +385,41 @@ export function cardHeightForText(
   return Math.max(minH, SHAPE_PAD[0] * 2 + lines * LINE_H + 8);
 }
 
+/** Width from longest line; clamped so short labels stay compact. */
+export function cardWidthForText(
+  text: string,
+  minW: number,
+  maxW: number
+): number {
+  let longest = 1;
+  for (const line of (text || ' ').split('\n')) {
+    longest = Math.max(longest, line.length);
+  }
+  const ideal = SHAPE_PAD[1] * 2 + longest * CHAR_W;
+  return Math.min(maxW, Math.max(minW, ideal));
+}
+
 function stackHeight(
-  kids: Array<{ text: string; q?: string }>,
-  width: number
+  kids: Array<{ text: string; q?: string; w: number }>,
+  fallbackW: number
 ): number {
   if (kids.length === 0) return LANE_CHILD_H;
   let h = 0;
   for (const kid of kids) {
-    h += cardHeightForText(kid.text, width, LANE_CHILD_H) + SHAPE_GAP_Y;
+    const w = kid.w || fallbackW;
+    h += cardHeightForText(kid.text, w, LANE_CHILD_H) + SHAPE_GAP_Y;
     if (kid.q) {
-      h += cardHeightForText(`❓ ${kid.q}`, width, LANE_CHILD_H) + SHAPE_GAP_Y;
+      h += cardHeightForText(`❓ ${kid.q}`, w, LANE_CHILD_H) + SHAPE_GAP_Y;
     }
   }
   return Math.max(LANE_CHILD_H, h - SHAPE_GAP_Y);
+}
+
+export function laneFill(kind: 'why' | 'who' | 'how' | 'what'): string {
+  if (kind === 'why') return COLOR_WHY;
+  if (kind === 'who') return COLOR_WHO;
+  if (kind === 'how') return COLOR_HOW;
+  return COLOR_WHAT;
 }
 
 function textOn(fill: string): string {
@@ -667,72 +695,6 @@ export function paintPlanFromTree(
     artifacts.filter(a => a.id).map(a => [String(a.id), a])
   );
 
-  const whyX = EQUIPOS_W + SECTION_GAP;
-  const whoX = whyX + WHY_COL_W + COL_GAP;
-  const howX = whoX + METH_COL_W + COL_GAP;
-  const whatX = howX + METH_COL_W + COL_GAP;
-  const methBandW = whatX + METH_COL_W - whyX;
-
-  const placeStack = (
-    kids: typeof artifacts,
-    kind: PaintRole,
-    colX: number,
-    topY: number,
-    parentExt: string,
-    width: number
-  ): void => {
-    let cy = topY;
-    for (const child of kids) {
-      const ce = child.external_id;
-      const label = child.body?.label || kind.toUpperCase();
-      const text = methodologyCardText(label, child.body?.statement, kind);
-      const h = cardHeightForText(text, width, LANE_CHILD_H);
-      shapes.push(
-        box(
-          {
-            role: kind,
-            externalId: ce,
-            name: label,
-            text,
-            fillColor: COLOR_PROPOSED,
-            strokeStyle: 'dash',
-            attrs: { statement: String(child.body?.statement ?? '') },
-          },
-          colX,
-          cy,
-          width,
-          h
-        )
-      );
-      connectors.push({ fromExternalId: parentExt, toExternalId: ce });
-      cy += h + SHAPE_GAP_Y;
-      if (child.body?.needs_human && child.body?.question) {
-        const qExt = `q-${ce}`;
-        const qText = `❓ ${child.body.question}`;
-        const qh = cardHeightForText(qText, width, LANE_CHILD_H);
-        shapes.push(
-          box(
-            {
-              role: 'question',
-              externalId: qExt,
-              name: 'Pregunta HITL',
-              text: qText,
-              fillColor: COLOR_Q,
-              strokeStyle: 'solid',
-              attrs: { question: String(child.body.question) },
-            },
-            colX,
-            cy,
-            width,
-            qh
-          )
-        );
-        connectors.push({ fromExternalId: ce, toExternalId: qExt });
-        cy += qh + SHAPE_GAP_Y;
-      }
-    }
-  };
-
   // —— Left: EQUIPOS ——
   let leftY = 0;
   shapes.push(
@@ -979,12 +941,134 @@ export function paintPlanFromTree(
     leftY += SECTION_GAP - SHAPE_GAP_Y;
   }
 
-  // —— Titles: WHY | WHO | HOW | WHAT ——
+  // —— Methodology bands: WHY | WHO | HOW | WHAT (Impact Mapping) ——
+  // Precompute card sizes so columns grow with content (not one fixed square).
+  type KidPack = {
+    ext: string;
+    label: string;
+    text: string;
+    w: number;
+    h: number;
+    q?: string;
+    qw?: number;
+    qh?: number;
+  };
+
+  const METH_MIN = 200;
+  const METH_MAX = 420;
+  const WHY_MIN = 200;
+  const WHY_MAX = 380;
+
+  const rows = whyList.map(why => {
+    const whyExt = why.external_id;
+    const children = why.id
+      ? (byParent.get(String(why.id)) ?? [])
+      : artifacts.filter(
+          a =>
+            a.kind !== 'why' &&
+            a.kind !== 'scenario' &&
+            a.external_id.includes(whyExt.replace('why-', ''))
+        );
+    const packKids = (kids: typeof artifacts, kind: PaintRole): KidPack[] =>
+      kids.map(c => {
+        const label = c.body?.label || kind.toUpperCase();
+        const text = methodologyCardText(label, c.body?.statement, kind);
+        const w = cardWidthForText(text, METH_MIN, METH_MAX);
+        const h = cardHeightForText(text, w, LANE_CHILD_H);
+        const q =
+          c.body?.needs_human && c.body?.question
+            ? String(c.body.question)
+            : undefined;
+        const qText = q ? `❓ ${q}` : undefined;
+        const qw = qText
+          ? cardWidthForText(qText, METH_MIN, METH_MAX)
+          : undefined;
+        const qh = qText
+          ? cardHeightForText(qText, qw ?? METH_MIN, LANE_CHILD_H)
+          : undefined;
+        return {
+          ext: c.external_id,
+          label,
+          text,
+          w: Math.max(w, qw ?? 0),
+          h,
+          q,
+          qw,
+          qh,
+        };
+      });
+
+    const whyLabel = why.body?.label || 'Sin título';
+    const whyText = methodologyCardText(whyLabel, why.body?.statement, 'why');
+    const whyW = cardWidthForText(whyText, WHY_MIN, WHY_MAX);
+    const whyH = cardHeightForText(whyText, whyW, LANE_CHILD_H);
+    let whyQW: number | undefined;
+    let whyQH: number | undefined;
+    let whyQ: string | undefined;
+    if (why.body?.needs_human && why.body?.question) {
+      whyQ = String(why.body.question);
+      const qText = `❓ ${whyQ}`;
+      whyQW = cardWidthForText(qText, WHY_MIN, WHY_MAX);
+      whyQH = cardHeightForText(qText, whyQW, LANE_CHILD_H);
+    }
+
+    return {
+      why,
+      whyExt,
+      whyLabel,
+      whyText,
+      whyW: Math.max(whyW, whyQW ?? 0),
+      whyH,
+      whyQ,
+      whyQW,
+      whyQH,
+      who: packKids(
+        children.filter(c => c.kind === 'who'),
+        'who'
+      ),
+      how: packKids(
+        children.filter(c => c.kind === 'how'),
+        'how'
+      ),
+      what: packKids(
+        children.filter(c => c.kind === 'what'),
+        'what'
+      ),
+    };
+  });
+
+  const whyColW = Math.max(
+    WHY_COL_W,
+    ...rows.map(r => r.whyW),
+    ...rows.flatMap(r => (r.whyQW ? [r.whyQW] : []))
+  );
+  const whoColW = Math.max(
+    METH_COL_W,
+    METH_MIN,
+    ...rows.flatMap(r => r.who.map(k => k.w))
+  );
+  const howColW = Math.max(
+    METH_COL_W,
+    METH_MIN,
+    ...rows.flatMap(r => r.how.map(k => k.w))
+  );
+  const whatColW = Math.max(
+    METH_COL_W,
+    METH_MIN,
+    ...rows.flatMap(r => r.what.map(k => k.w))
+  );
+
+  const whyX = EQUIPOS_W + SECTION_GAP;
+  const whoX = whyX + whyColW + COL_GAP;
+  const howX = whoX + whoColW + COL_GAP;
+  const whatX = howX + howColW + COL_GAP;
+  const methBandW = whatX + whatColW - whyX;
+
   for (const [ext, name, x, w] of [
-    ['title-why', 'WHY', whyX, WHY_COL_W],
-    ['title-who', 'WHO', whoX, METH_COL_W],
-    ['title-how', 'HOW', howX, METH_COL_W],
-    ['title-what', 'WHAT', whatX, METH_COL_W],
+    ['title-why', 'WHY', whyX, whyColW],
+    ['title-who', 'WHO', whoX, whoColW],
+    ['title-how', 'HOW', howX, howColW],
+    ['title-what', 'WHAT', whatX, whatColW],
   ] as const) {
     shapes.push(
       box(
@@ -1005,123 +1089,145 @@ export function paintPlanFromTree(
     );
   }
 
-  // —— Rows: each WHY with its WHO / HOW / WHAT stacks ——
-  let rowY = TITLE_H + SHAPE_GAP_Y;
-  for (const why of whyList) {
-    const whyExt = why.external_id;
-    const children = why.id
-      ? (byParent.get(String(why.id)) ?? [])
-      : artifacts.filter(
-          a =>
-            a.kind !== 'why' &&
-            a.kind !== 'scenario' &&
-            a.external_id.includes(whyExt.replace('why-', ''))
-        );
-    const whoKids = children.filter(c => c.kind === 'who');
-    const howKids = children.filter(c => c.kind === 'how');
-    const whatKids = children.filter(c => c.kind === 'what');
-
-    const whyLabel = why.body?.label || 'Sin título';
-    const whyText = methodologyCardText(whyLabel, why.body?.statement, 'why');
-    const whyH = cardHeightForText(whyText, WHY_COL_W, LANE_CHILD_H);
-    const whoItems = whoKids.map(c => ({
-      text: methodologyCardText(
-        c.body?.label || 'WHO',
-        c.body?.statement,
-        'who'
-      ),
-      q:
-        c.body?.needs_human && c.body?.question
-          ? String(c.body.question)
-          : undefined,
-    }));
-    const howItems = howKids.map(c => ({
-      text: methodologyCardText(
-        c.body?.label || 'HOW',
-        c.body?.statement,
-        'how'
-      ),
-      q:
-        c.body?.needs_human && c.body?.question
-          ? String(c.body.question)
-          : undefined,
-    }));
-    const whatItems = whatKids.map(c => ({
-      text: methodologyCardText(
-        c.body?.label || 'WHAT',
-        c.body?.statement,
-        'what'
-      ),
-      q:
-        c.body?.needs_human && c.body?.question
-          ? String(c.body.question)
-          : undefined,
-    }));
-
-    let rowH = Math.max(
-      whyH,
-      stackHeight(whoItems, METH_COL_W),
-      stackHeight(howItems, METH_COL_W),
-      stackHeight(whatItems, METH_COL_W)
-    );
-    if (why.body?.needs_human && why.body?.question) {
-      const qh = cardHeightForText(
-        `❓ ${why.body.question}`,
-        WHY_COL_W,
-        LANE_CHILD_H
+  const placeKidStack = (
+    kids: KidPack[],
+    kind: 'who' | 'how' | 'what',
+    colX: number,
+    topY: number,
+    colW: number
+  ): string[] => {
+    const ids: string[] = [];
+    let cy = topY;
+    const fill = laneFill(kind);
+    for (const kid of kids) {
+      const cardW = Math.min(colW, Math.max(kid.w, METH_MIN));
+      shapes.push(
+        box(
+          {
+            role: kind,
+            externalId: kid.ext,
+            name: kid.label,
+            text: kid.text,
+            fillColor: fill,
+            strokeStyle: 'dash',
+            attrs: { statement: kid.text },
+          },
+          colX,
+          cy,
+          cardW,
+          kid.h
+        )
       );
-      rowH = Math.max(rowH, whyH + SHAPE_GAP_Y + qh);
+      ids.push(kid.ext);
+      cy += kid.h + SHAPE_GAP_Y;
+      if (kid.q && kid.qh) {
+        const qExt = `q-${kid.ext}`;
+        const qW = Math.min(colW, kid.qw ?? cardW);
+        shapes.push(
+          box(
+            {
+              role: 'question',
+              externalId: qExt,
+              name: 'Pregunta HITL',
+              text: `❓ ${kid.q}`,
+              fillColor: COLOR_Q,
+              strokeStyle: 'solid',
+              attrs: { question: kid.q },
+            },
+            colX,
+            cy,
+            qW,
+            kid.qh
+          )
+        );
+        connectors.push({ fromExternalId: kid.ext, toExternalId: qExt });
+        cy += kid.qh + SHAPE_GAP_Y;
+      }
+    }
+    return ids;
+  };
+
+  let rowY = TITLE_H + SHAPE_GAP_Y;
+  for (const row of rows) {
+    const whoH = stackHeight(
+      row.who.map(k => ({ text: k.text, q: k.q, w: k.w })),
+      whoColW
+    );
+    const howH = stackHeight(
+      row.how.map(k => ({ text: k.text, q: k.q, w: k.w })),
+      howColW
+    );
+    const whatH = stackHeight(
+      row.what.map(k => ({ text: k.text, q: k.q, w: k.w })),
+      whatColW
+    );
+    let rowH = Math.max(row.whyH, whoH, howH, whatH);
+    if (row.whyQ && row.whyQH) {
+      rowH = Math.max(rowH, row.whyH + SHAPE_GAP_Y + row.whyQH);
     }
 
     shapes.push(
       box(
         {
           role: 'why',
-          externalId: whyExt,
-          name: whyLabel,
-          text: whyText,
-          fillColor: COLOR_PROPOSED,
+          externalId: row.whyExt,
+          name: row.whyLabel,
+          text: row.whyText,
+          fillColor: laneFill('why'),
           strokeStyle: 'dash',
-          attrs: { statement: String(why.body?.statement ?? '') },
+          attrs: { statement: String(row.why.body?.statement ?? '') },
         },
         whyX,
         rowY,
-        WHY_COL_W,
-        whyH
+        Math.min(whyColW, Math.max(row.whyW, WHY_MIN)),
+        row.whyH
       )
     );
-    if (why.body?.needs_human && why.body?.question) {
-      const qExt = `q-${whyExt}`;
-      const qText = `❓ ${why.body.question}`;
-      const qh = cardHeightForText(qText, WHY_COL_W, LANE_CHILD_H);
+    if (row.whyQ && row.whyQH && row.whyQW) {
+      const qExt = `q-${row.whyExt}`;
       shapes.push(
         box(
           {
             role: 'question',
             externalId: qExt,
             name: 'Pregunta HITL',
-            text: qText,
+            text: `❓ ${row.whyQ}`,
             fillColor: COLOR_Q,
             strokeStyle: 'solid',
-            attrs: { question: String(why.body.question) },
+            attrs: { question: row.whyQ },
           },
           whyX,
-          rowY + whyH + SHAPE_GAP_Y,
-          WHY_COL_W,
-          qh
+          rowY + row.whyH + SHAPE_GAP_Y,
+          Math.min(whyColW, row.whyQW),
+          row.whyQH
         )
       );
-      connectors.push({ fromExternalId: whyExt, toExternalId: qExt });
+      connectors.push({ fromExternalId: row.whyExt, toExternalId: qExt });
     }
 
-    placeStack(whoKids, 'who', whoX, rowY, whyExt, METH_COL_W);
-    placeStack(howKids, 'how', howX, rowY, whyExt, METH_COL_W);
-    placeStack(whatKids, 'what', whatX, rowY, whyExt, METH_COL_W);
+    const whoIds = placeKidStack(row.who, 'who', whoX, rowY, whoColW);
+    const howIds = placeKidStack(row.how, 'how', howX, rowY, howColW);
+    const whatIds = placeKidStack(row.what, 'what', whatX, rowY, whatColW);
+
+    // Impact Mapping chain: WHY→WHO→HOW→WHAT (not WHY→all).
+    for (const wid of whoIds) {
+      connectors.push({ fromExternalId: row.whyExt, toExternalId: wid });
+    }
+    howIds.forEach((hid, i) => {
+      if (whoIds.length === 0) return;
+      const src = whoIds[Math.min(i, whoIds.length - 1)];
+      if (src) connectors.push({ fromExternalId: src, toExternalId: hid });
+    });
+    whatIds.forEach((tid, i) => {
+      if (howIds.length === 0) return;
+      const src = howIds[Math.min(i, howIds.length - 1)];
+      if (src) connectors.push({ fromExternalId: src, toExternalId: tid });
+    });
 
     rowY += rowH + SECTION_GAP;
   }
 
-  // —— SCENARIOS (tied to parent WHAT/HOW) ——
+  // —— SCENARIOS = Z4 BDD under WHAT (methodology) ——
   const belowY = Math.max(leftY, rowY) + SECTION_GAP;
   const fullW = EQUIPOS_W + SECTION_GAP + methBandW;
   if (scenarios.length > 0) {
@@ -1143,16 +1249,17 @@ export function paintPlanFromTree(
       )
     );
     let sy = belowY + TITLE_H + SHAPE_GAP_Y;
-    const scenW = Math.min(METH_COL_W * 2, fullW);
     for (const sc of scenarios) {
-      const parent = sc.parent_id
+      let parent = sc.parent_id
         ? artifactById.get(String(sc.parent_id))
         : undefined;
+      // Prefer WHAT parent (Z4 under WHAT); if seed pointed at HOW, keep it.
       const parentKind = parent?.kind?.toUpperCase() ?? '?';
       const parentLabel =
         parent?.body?.label || parent?.external_id || 'sin padre';
       const label = sc.body?.label || sc.external_id;
       const text = `${methodologyCardText(label, sc.body?.statement, 'scenario')}\n↳ ${parentKind}: ${parentLabel}`;
+      const scenW = cardWidthForText(text, METH_MIN * 2, Math.min(fullW, 720));
       const sh = cardHeightForText(text, scenW, LANE_CHILD_H);
       shapes.push(
         box(
@@ -1168,7 +1275,7 @@ export function paintPlanFromTree(
               parent: parent?.external_id ?? '',
             },
           },
-          whyX,
+          whatX,
           sy,
           scenW,
           sh

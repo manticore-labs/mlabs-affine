@@ -58,3 +58,22 @@ test('readSelectedExternalId reads HITL q-* cards', () => {
     'q-what-toc'
   );
 });
+
+test('toolbar when-gate: foreign Getting Started selection has no mlabs id', () => {
+  // Mirrors when(ctx): only show 💬 if readSelectedExternalId is truthy.
+  const foreignGroup = {
+    yMap: {
+      get: (key: string) => (key === 'type' ? 'group' : undefined),
+      toJSON: () => ({ type: 'group', xywh: '[0,0,100,100]' }),
+    },
+  };
+  assert.equal(Boolean(readSelectedExternalId([foreignGroup])), false);
+  assert.equal(
+    Boolean(
+      readSelectedExternalId([
+        { mlabsAttrs: { externalId: 'mlabs:pepe-techlead', role: 'person' } },
+      ])
+    ),
+    true
+  );
+});

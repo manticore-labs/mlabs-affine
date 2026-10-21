@@ -25,13 +25,17 @@ export function mlabsSurfaceToolbarConfig(): ToolbarModuleConfig {
         score: 0,
         when(ctx) {
           try {
-            return ctx.getSurfaceModels().length > 0;
+            // Only Pintar-owned surface elements (mlabsAttrs.externalId).
+            // Getting Started / foreign notes/groups must not show 💬 mlabs.
+            return Boolean(readSelectedExternalId(ctx.getSurfaceModels()));
           } catch {
             return false;
           }
         },
         content: ctx => {
           const selectedId = readSelectedExternalId(ctx.getSurfaceModels());
+          // Never clear sticky on empty selection — mobile tap clears selection
+          // and re-runs content() before click; latch must survive.
           if (selectedId) stickyFeedbackId = selectedId;
           const store = ctx.host.store;
           const latchId = () => {

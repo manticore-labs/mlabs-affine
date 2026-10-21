@@ -84,6 +84,8 @@ export type DifySourcesPanelProps = {
   fetchImpl?: FetchLike;
   initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar';
   focusFeedback?: boolean;
+  /** Pre-select this registry external_id in the 💬 feedback form. */
+  initialFeedbackId?: string;
   onClose: () => void;
 };
 
@@ -95,6 +97,7 @@ export function openDifySourcesPanel(input: {
   fetchImpl?: FetchLike;
   initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar';
   focusFeedback?: boolean;
+  initialFeedbackId?: string;
 }) {
   const host = globalThis.document?.createElement('div');
   if (!host || !globalThis.document?.body) return;
@@ -115,6 +118,7 @@ export function openDifySourcesPanel(input: {
       fetchImpl={input.fetchImpl}
       initialTab={input.initialTab}
       focusFeedback={input.focusFeedback}
+      initialFeedbackId={input.initialFeedbackId}
       onClose={close}
     />
   );
@@ -323,6 +327,7 @@ export function DifySourcesPanel({
   fetchImpl = globalThis.fetch.bind(globalThis),
   initialTab = 'fuentes',
   focusFeedback = false,
+  initialFeedbackId,
   onClose,
 }: DifySourcesPanelProps) {
   const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'why' | 'pintar'>(
@@ -353,7 +358,7 @@ export function DifySourcesPanel({
       statement: string;
     }>
   >([]);
-  const [feedbackPick, setFeedbackPick] = useState('');
+  const [feedbackPick, setFeedbackPick] = useState(initialFeedbackId ?? '');
   const [feedbackNote, setFeedbackNote] = useState('');
 
   const remember = useCallback(
@@ -430,7 +435,16 @@ export function DifySourcesPanel({
           });
         }
         setFeedbackNodes(nodes);
-        if (nodes[0]) setFeedbackPick(nodes[0].externalId);
+        const preferred =
+          (initialFeedbackId &&
+            nodes.find(
+              n =>
+                n.externalId === initialFeedbackId ||
+                n.externalId === initialFeedbackId.replace(/^mlabs:/, '') ||
+                `mlabs:${n.externalId}` === initialFeedbackId
+            )?.externalId) ||
+          nodes[0]?.externalId;
+        if (preferred) setFeedbackPick(preferred);
       } catch {
         /* feedback list is best-effort; user can retry via select focus */
       }
@@ -438,7 +452,7 @@ export function DifySourcesPanel({
     loadFeedbackNodes().catch(() => {
       /* swallowed above */
     });
-  }, [fetchImpl, focusFeedback]);
+  }, [fetchImpl, focusFeedback, initialFeedbackId]);
 
   const run = async (fallback: string, action: () => Promise<void>) => {
     setActionBusy(true);
@@ -982,11 +996,12 @@ export function DifySourcesPanel({
               ) : (
                 <>
                   <p className={styles.lead}>
-                    Pinta el caso desde el registry (equipos, personas,
-                    jerarquía + WHY→WHO→HOW→WHAT + escenarios). Verde =
-                    personas; amarillo = metodología; ❓ = HITL. Comentario a
-                    Dify: slash <code>💬 Comentario Mlabs</code> o botón 💬 del
-                    toolbar del lienzo (edgeless, con un shape seleccionado).
+                    Pinta el caso desde el registry (equipos + bandas
+                    WHY→WHO→HOW→WHAT→SCENARIOS). Comentario a Dify: seleccioná
+                    una carta en el lienzo → toolbar <code>💬 Comentario</code>,
+                    o slash <code>💬 Comentario Mlabs</code>. No hay icono
+                    pintado dentro de cada shape (limitación del toolbar de
+                    Affine).
                   </p>
                   <div className={styles.actions}>
                     <Button

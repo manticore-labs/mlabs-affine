@@ -225,6 +225,7 @@ test('bands: EQUIPOS | WHY | WHO | HOW | WHAT + foreign gap', () => {
   assert.ok(titleXs.WHO! > titleXs.WHY!);
   assert.ok(titleXs.HOW! > titleXs.WHO!);
   assert.ok(titleXs.WHAT! > titleXs.HOW!);
+  assert.ok(titleXs.SCENARIOS! > titleXs.WHAT!);
 
   const who = tree.shapes.find(s => s.role === 'who');
   const how = tree.shapes.find(s => s.role === 'how');
@@ -237,6 +238,11 @@ test('bands: EQUIPOS | WHY | WHO | HOW | WHAT + foreign gap', () => {
   const scen = tree.shapes.find(s => s.role === 'scenario');
   assert.ok(scen);
   assert.match(scen!.text, /↳ WHAT:/);
+  const whatCard = tree.shapes.find(s => s.role === 'what');
+  assert.ok(whatCard);
+  const scenX = Number(scen!.xywh.match(/^\[(-?\d+)/)?.[1]);
+  const whatX = Number(whatCard!.xywh.match(/^\[(-?\d+)/)?.[1]);
+  assert.ok(scenX > whatX);
   assert.ok(
     tree.connectors.some(
       c =>

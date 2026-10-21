@@ -335,17 +335,22 @@ export type RegistryTree = {
 };
 
 const COLOR_OK = '#3cbc36';
-/** Legacy amber — prefer laneFill() for methodology cards. */
-const COLOR_PROPOSED = '#e8b84a';
 const COLOR_TITLE = '#2a2a2a';
 const COLOR_TEAM = '#1f6f4a';
+/** HITL accent (only non-green family — alerts). */
 const COLOR_Q = '#c45c26';
-/** Impact Mapping lanes — light fills, dark text (distinct + accessible). */
-const COLOR_WHY = '#e8b84a'; // gold — business goal
-const COLOR_WHO = '#6ba3d4'; // blue — actors
-const COLOR_HOW = '#5fb89a'; // teal — activities (≠ team green)
-const COLOR_WHAT = '#b08fd4'; // lavender — deliverables
-const COLOR_SCENARIO = '#6b5b95'; // deeper purple — BDD under WHAT
+/**
+ * Lane palette: analogous cool progression from team green (#1f6f4a / #3cbc36).
+ * Same chroma family, hue shifts WHY→WHO→HOW→WHAT→SCENARIO (left→right process).
+ * Derived as a continuous green→teal scale (not unrelated primaries).
+ */
+const COLOR_WHY = '#c5d67a'; // yellow-green (light goal)
+const COLOR_WHO = '#7cbc8a'; // soft green (actors in ecosystem)
+const COLOR_HOW = '#4fa892'; // teal-green (activities)
+const COLOR_WHAT = '#3d8f9a'; // blue-teal (deliverables)
+const COLOR_SCENARIO = '#2f6d78'; // deep teal (BDD / Z4)
+/** @deprecated alias — use laneFill('why') */
+const COLOR_PROPOSED = COLOR_WHY;
 
 export function shapeCaption(label: string, statement?: string): string {
   const body = (statement ?? '').trim();
@@ -423,7 +428,14 @@ export function laneFill(kind: 'why' | 'who' | 'how' | 'what'): string {
 }
 
 function textOn(fill: string): string {
-  const darkFills = new Set([COLOR_TITLE, COLOR_TEAM, COLOR_Q, COLOR_SCENARIO]);
+  const darkFills = new Set([
+    COLOR_TITLE,
+    COLOR_TEAM,
+    COLOR_Q,
+    COLOR_HOW,
+    COLOR_WHAT,
+    COLOR_SCENARIO,
+  ]);
   return darkFills.has(fill) ? COLOR_TEXT_LIGHT : COLOR_TEXT_DARK;
 }
 
@@ -1037,6 +1049,44 @@ export function paintPlanFromTree(
     };
   });
 
+  // Pack scenarios for column (keyed by parent external_id)
+  type ScenPack = {
+    ext: string;
+    label: string;
+    text: string;
+    w: number;
+    h: number;
+    parentExt: string;
+  };
+  const scenByParent = new Map<string, ScenPack[]>();
+  const allScenPacks: ScenPack[] = [];
+  for (const sc of scenarios) {
+    const parent = sc.parent_id
+      ? artifactById.get(String(sc.parent_id))
+      : undefined;
+    const parentExt = parent?.external_id ?? '';
+    const parentKind = parent?.kind?.toUpperCase() ?? '?';
+    const parentLabel =
+      parent?.body?.label || parent?.external_id || 'sin padre';
+    const label = sc.body?.label || sc.external_id;
+    const text = `${methodologyCardText(label, sc.body?.statement, 'scenario')}\n↳ ${parentKind}: ${parentLabel}`;
+    const w = cardWidthForText(text, METH_MIN, METH_MAX);
+    const h = cardHeightForText(text, w, LANE_CHILD_H);
+    const pack: ScenPack = {
+      ext: sc.external_id,
+      label,
+      text,
+      w,
+      h,
+      parentExt,
+    };
+    allScenPacks.push(pack);
+    if (!parentExt) continue;
+    const list = scenByParent.get(parentExt) ?? [];
+    list.push(pack);
+    scenByParent.set(parentExt, list);
+  }
+
   const whyColW = Math.max(
     WHY_COL_W,
     ...rows.map(r => r.whyW),
@@ -1057,18 +1107,25 @@ export function paintPlanFromTree(
     METH_MIN,
     ...rows.flatMap(r => r.what.map(k => k.w))
   );
+  const scenColW = Math.max(
+    METH_COL_W,
+    METH_MIN,
+    ...allScenPacks.map(s => s.w),
+    0
+  );
 
   const whyX = EQUIPOS_W + SECTION_GAP;
   const whoX = whyX + whyColW + COL_GAP;
   const howX = whoX + whoColW + COL_GAP;
   const whatX = howX + howColW + COL_GAP;
-  const methBandW = whatX + whatColW - whyX;
+  const scenX = whatX + whatColW + COL_GAP;
 
   for (const [ext, name, x, w] of [
     ['title-why', 'WHY', whyX, whyColW],
     ['title-who', 'WHO', whoX, whoColW],
     ['title-how', 'HOW', howX, howColW],
     ['title-what', 'WHAT', whatX, whatColW],
+    ['title-scenarios', 'SCENARIOS', scenX, scenColW],
   ] as const) {
     shapes.push(
       box(
@@ -1147,6 +1204,7 @@ export function paintPlanFromTree(
     return ids;
   };
 
+  const placedScen = new Set<string>();
   let rowY = TITLE_H + SHAPE_GAP_Y;
   for (const row of rows) {
     const whoH = stackHeight(
@@ -1161,7 +1219,19 @@ export function paintPlanFromTree(
       row.what.map(k => ({ text: k.text, q: k.q, w: k.w })),
       whatColW
     );
-    let rowH = Math.max(row.whyH, whoH, howH, whatH);
+
+    const rowParentExts = [
+      ...row.what.map(k => k.ext),
+      ...row.how.map(k => k.ext),
+    ];
+    const rowScens = rowParentExts.flatMap(ext => scenByParent.get(ext) ?? []);
+    const scenH =
+      rowScens.length === 0
+        ? 0
+        : rowScens.reduce((a, s) => a + s.h, 0) +
+          Math.max(0, rowScens.length - 1) * SHAPE_GAP_Y;
+
+    let rowH = Math.max(row.whyH, whoH, howH, whatH, scenH || LANE_CHILD_H);
     if (row.whyQ && row.whyQH) {
       rowH = Math.max(rowH, row.whyH + SHAPE_GAP_Y + row.whyQH);
     }
@@ -1209,7 +1279,7 @@ export function paintPlanFromTree(
     const howIds = placeKidStack(row.how, 'how', howX, rowY, howColW);
     const whatIds = placeKidStack(row.what, 'what', whatX, rowY, whatColW);
 
-    // Impact Mapping chain: WHY→WHO→HOW→WHAT (not WHY→all).
+    // Impact Mapping: WHY→WHO→HOW→WHAT
     for (const wid of whoIds) {
       connectors.push({ fromExternalId: row.whyExt, toExternalId: wid });
     }
@@ -1224,70 +1294,71 @@ export function paintPlanFromTree(
       if (src) connectors.push({ fromExternalId: src, toExternalId: tid });
     });
 
-    rowY += rowH + SECTION_GAP;
-  }
-
-  // —— SCENARIOS = Z4 BDD under WHAT (methodology) ——
-  const belowY = Math.max(leftY, rowY) + SECTION_GAP;
-  const fullW = EQUIPOS_W + SECTION_GAP + methBandW;
-  if (scenarios.length > 0) {
-    shapes.push(
-      box(
-        {
-          role: 'title',
-          externalId: 'title-scenarios',
-          name: 'SCENARIOS',
-          text: 'SCENARIOS',
-          fillColor: COLOR_TITLE,
-          strokeStyle: 'solid',
-          attrs: { section: 'scenarios' },
-        },
-        0,
-        belowY,
-        fullW,
-        TITLE_H
-      )
-    );
-    let sy = belowY + TITLE_H + SHAPE_GAP_Y;
-    for (const sc of scenarios) {
-      let parent = sc.parent_id
-        ? artifactById.get(String(sc.parent_id))
-        : undefined;
-      // Prefer WHAT parent (Z4 under WHAT); if seed pointed at HOW, keep it.
-      const parentKind = parent?.kind?.toUpperCase() ?? '?';
-      const parentLabel =
-        parent?.body?.label || parent?.external_id || 'sin padre';
-      const label = sc.body?.label || sc.external_id;
-      const text = `${methodologyCardText(label, sc.body?.statement, 'scenario')}\n↳ ${parentKind}: ${parentLabel}`;
-      const scenW = cardWidthForText(text, METH_MIN * 2, Math.min(fullW, 720));
-      const sh = cardHeightForText(text, scenW, LANE_CHILD_H);
+    // SCENARIOS column — right of WHAT, same row as parent
+    let sy = rowY;
+    for (const sc of rowScens) {
+      if (placedScen.has(sc.ext)) continue;
+      const cardW = Math.min(scenColW, Math.max(sc.w, METH_MIN));
       shapes.push(
         box(
           {
             role: 'scenario',
-            externalId: sc.external_id,
-            name: label,
-            text,
+            externalId: sc.ext,
+            name: sc.label,
+            text: sc.text,
             fillColor: COLOR_SCENARIO,
             strokeStyle: 'solid',
-            attrs: {
-              statement: String(sc.body?.statement ?? ''),
-              parent: parent?.external_id ?? '',
-            },
+            attrs: { parent: sc.parentExt },
           },
-          whatX,
+          scenX,
           sy,
-          scenW,
-          sh
+          cardW,
+          sc.h
         )
       );
-      if (parent) {
+      if (sc.parentExt) {
         connectors.push({
-          fromExternalId: parent.external_id,
-          toExternalId: sc.external_id,
+          fromExternalId: sc.parentExt,
+          toExternalId: sc.ext,
         });
       }
-      sy += sh + SHAPE_GAP_Y;
+      placedScen.add(sc.ext);
+      sy += sc.h + SHAPE_GAP_Y;
+    }
+
+    rowY += rowH + SECTION_GAP;
+  }
+
+  // Leftover scenarios (parent not in any row) stack at bottom of SCENARIOS col
+  const leftovers = allScenPacks.filter(s => !placedScen.has(s.ext));
+  if (leftovers.length > 0) {
+    let sy = rowY;
+    for (const sc of leftovers) {
+      const cardW = Math.min(scenColW, Math.max(sc.w, METH_MIN));
+      shapes.push(
+        box(
+          {
+            role: 'scenario',
+            externalId: sc.ext,
+            name: sc.label,
+            text: sc.text,
+            fillColor: COLOR_SCENARIO,
+            strokeStyle: 'solid',
+            attrs: { parent: sc.parentExt },
+          },
+          scenX,
+          sy,
+          cardW,
+          sc.h
+        )
+      );
+      if (sc.parentExt) {
+        connectors.push({
+          fromExternalId: sc.parentExt,
+          toExternalId: sc.ext,
+        });
+      }
+      sy += sc.h + SHAPE_GAP_Y;
     }
   }
 

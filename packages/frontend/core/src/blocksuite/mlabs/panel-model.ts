@@ -1,5 +1,7 @@
 export const PAGE_FILE_NAME = 'mlabs-page.txt';
 export const MAX_FILE_BYTES = 15 * 1024 * 1024;
+/** Max files per 💬 feedback submit (same dataset as Fuentes). */
+export const MAX_FEEDBACK_FILES = 5;
 
 /** Strip mlabs: so canvas short ids and registry full ids compare equal. */
 export function normalizeExtId(id: string): string {

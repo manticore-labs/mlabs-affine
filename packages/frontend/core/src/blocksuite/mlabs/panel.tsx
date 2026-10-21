@@ -14,6 +14,7 @@ import {
   indexingNotice,
   isOwnNode,
   matchFeedbackExternalId,
+  MAX_FEEDBACK_FILES,
   openRequestBody,
   type PageDoc,
   paintPlanFromTree,
@@ -390,7 +391,7 @@ export function DifySourcesPanel({
   >([]);
   const [feedbackPick, setFeedbackPick] = useState(initialFeedbackId ?? '');
   const [feedbackNote, setFeedbackNote] = useState('');
-  const [feedbackFile, setFeedbackFile] = useState<File | null>(null);
+  const [feedbackFiles, setFeedbackFiles] = useState<File[]>([]);
 
   const remember = useCallback(
     (id: string) => {
@@ -923,30 +924,62 @@ export function DifySourcesPanel({
                   <div className={styles.uploadRow}>
                     <Button
                       variant="secondary"
-                      disabled={!ready || actionBusy}
+                      disabled={
+                        !ready ||
+                        actionBusy ||
+                        feedbackFiles.length >= MAX_FEEDBACK_FILES
+                      }
                       onClick={() => {
                         const input =
                           globalThis.document.createElement('input');
                         input.type = 'file';
+                        input.multiple = true;
                         input.accept =
                           '.pdf,.md,.markdown,.txt,.doc,.docx,.csv,.html,.htm,.pptx,.xls,.xlsx,.vtt,.mdx';
                         input.onchange = () => {
-                          setFeedbackFile(input.files?.[0] ?? null);
+                          const picked = Array.from(input.files ?? []);
+                          setFeedbackFiles(prev => {
+                            const room = MAX_FEEDBACK_FILES - prev.length;
+                            if (room <= 0) return prev;
+                            const next = [...prev];
+                            for (const f of picked) {
+                              if (next.length >= MAX_FEEDBACK_FILES) break;
+                              if (
+                                next.some(
+                                  x =>
+                                    x.name === f.name &&
+                                    x.size === f.size &&
+                                    x.lastModified === f.lastModified
+                                )
+                              ) {
+                                continue;
+                              }
+                              next.push(f);
+                            }
+                            return next;
+                          });
                         };
                         input.click();
                       }}
                     >
-                      Adjuntar archivo
+                      Adjuntar archivos
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={actionBusy || feedbackFiles.length === 0}
+                      onClick={() => setFeedbackFiles([])}
+                    >
+                      Quitar adjuntos
                     </Button>
                     <span className={styles.fileName}>
-                      {feedbackFile
-                        ? feedbackFile.name
-                        : 'Sin adjunto (igual que Fuentes)'}
+                      {feedbackFiles.length === 0
+                        ? `Sin adjuntos (máx ${MAX_FEEDBACK_FILES})`
+                        : feedbackFiles.map(f => f.name).join(', ')}
                     </span>
                   </div>
                   <p className={styles.lead}>
-                    pdf, md, txt, docx… hasta 15 MB. Se indexa en el mismo
-                    dataset (Fuentes) y queda referenciado en el feedback.
+                    Hasta {MAX_FEEDBACK_FILES} archivos · pdf/md/txt/docx… · 15
+                    MB c/u. Se indexan en Fuentes y quedan en el feedback.
                   </p>
                   <div className={styles.actions}>
                     <Button
@@ -968,11 +1001,16 @@ export function DifySourcesPanel({
                             );
                             if (!node)
                               throw new Error('Elegí un nodo del árbol.');
-                            let attachmentName: string | undefined;
-                            if (feedbackFile) {
+                            if (feedbackFiles.length > MAX_FEEDBACK_FILES) {
+                              throw new Error(
+                                `Máximo ${MAX_FEEDBACK_FILES} archivos por comentario.`
+                              );
+                            }
+                            const attachmentNames: string[] = [];
+                            for (const file of feedbackFiles) {
                               const rejection = uploadRejection(
-                                feedbackFile.name,
-                                feedbackFile.size
+                                file.name,
+                                file.size
                               );
                               if (rejection) throw new Error(rejection);
                               const up = await fetchImpl(
@@ -983,16 +1021,16 @@ export function DifySourcesPanel({
                                     'content-type': 'application/octet-stream',
                                     'x-mlabs-dataset-id': datasetId,
                                     'x-mlabs-file-name': encodeURIComponent(
-                                      feedbackFile.name
+                                      file.name
                                     ),
                                   },
-                                  body: feedbackFile,
+                                  body: file,
                                 }
                               );
                               if (!up.ok) {
                                 throw new Error(await readBridgeError(up));
                               }
-                              attachmentName = feedbackFile.name;
+                              attachmentNames.push(file.name);
                             }
                             const response = await fetchImpl(
                               `${FRAMEWORK}/feedback`,
@@ -1007,7 +1045,11 @@ export function DifySourcesPanel({
                                   label: node.label,
                                   statement: node.statement,
                                   note: feedbackNote.trim(),
-                                  attachment: attachmentName,
+                                  attachment:
+                                    attachmentNames.length === 1
+                                      ? attachmentNames[0]
+                                      : undefined,
+                                  attachments: attachmentNames,
                                   engagement_id: 'poc-s1',
                                   request_id: crypto.randomUUID(),
                                 }),
@@ -1021,13 +1063,15 @@ export function DifySourcesPanel({
                             };
                             notify.success({
                               title: 'Mlabs Framework',
-                              message: attachmentName
-                                ? `Enviado + adjunto «${attachmentName}»: ${body.document?.name ?? node.label}`
-                                : `Enviado a Dify: ${body.document?.name ?? node.label}`,
+                              message:
+                                attachmentNames.length > 0
+                                  ? `Enviado + ${attachmentNames.length} adjunto(s): ${body.document?.name ?? node.label}`
+                                  : `Enviado a Dify: ${body.document?.name ?? node.label}`,
                             });
                             setFeedbackNote('');
-                            setFeedbackFile(null);
-                            if (attachmentName) await refresh(datasetId);
+                            setFeedbackFiles([]);
+                            if (attachmentNames.length > 0)
+                              await refresh(datasetId);
                           }
                         )
                       }

@@ -251,6 +251,12 @@ export const SHAPE_GAP_Y = 20;
 export const SHAPE_GAP_X = 28;
 export const SECTION_GAP = 56;
 export const COL_GAP = 28;
+/** Gap between our map's right edge and the leftmost foreign content. */
+export const FOREIGN_GAP = 200;
+export const WHY_CARD_W = TEAM_W + 40;
+export const EQUIPOS_W = TEAM_W + SHAPE_GAP_X + MEMBER_W;
+export const WHY_LANE_W =
+  WHY_CARD_W + SHAPE_GAP_X + LANE_CHILD_W * 3 + COL_GAP * 2;
 /** [vertical, horizontal] text padding inside shapes */
 export const SHAPE_PAD: [number, number] = [22, 28];
 export const COLOR_TEXT_LIGHT = '#f5f5f5';
@@ -439,25 +445,77 @@ export function runOnStore(
   else fn();
 }
 
+export function parseXywh(
+  xywh: string | undefined
+): [number, number, number, number] | null {
+  if (!xywh) return null;
+  try {
+    const parsed = JSON.parse(xywh) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 4 &&
+      parsed.every(part => typeof part === 'number' && Number.isFinite(part))
+    ) {
+      return parsed as [number, number, number, number];
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Leftmost X among foreign (non-mlabs) elements — notes, images, shapes. */
 export function foreignMinX(xywhs: Array<string | undefined>): number | null {
   const xs: number[] = [];
   for (const xywh of xywhs) {
-    if (!xywh) continue;
-    try {
-      const parsed = JSON.parse(xywh) as unknown;
-      if (
-        Array.isArray(parsed) &&
-        parsed.length === 4 &&
-        parsed.every(part => typeof part === 'number' && Number.isFinite(part))
-      ) {
-        xs.push(parsed[0] as number);
-      }
-    } catch {
-      /* ignore */
-    }
+    const box = parseXywh(xywh);
+    if (box) xs.push(box[0]);
   }
   if (xs.length === 0) return null;
   return Math.min(...xs);
+}
+
+export function planBounds(shapes: PaintShape[]): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+} {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const s of shapes) {
+    const b = parseXywh(s.xywh);
+    if (!b) continue;
+    const [x, y, w, h] = b;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + w);
+    maxY = Math.max(maxY, y + h);
+  }
+  if (!Number.isFinite(minX)) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 };
+  }
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+function shiftShapes(shapes: PaintShape[], dx: number, dy: number): void {
+  if (dx === 0 && dy === 0) return;
+  for (const s of shapes) {
+    const b = parseXywh(s.xywh);
+    if (!b) continue;
+    s.xywh = `[${b[0] + dx},${b[1] + dy},${b[2]},${b[3]}]`;
+  }
 }
 
 function box(
@@ -486,10 +544,9 @@ export function paintPlanFromTree(
   tree: RegistryTree | null,
   foreignLeft: number | null
 ): PaintPlan {
-  const originX = foreignLeft == null ? 0 : foreignLeft - 980;
+  // Layout at (0,0); shift left of foreign content after measuring total width.
   const shapes: PaintShape[] = [];
   const connectors: PaintConnector[] = [];
-  let y = 0;
 
   const actors = (tree?.actors ?? []).filter(
     a => !a.external_id.includes('smoke')
@@ -500,7 +557,6 @@ export function paintPlanFromTree(
 
   const memberOf = new Map<string, string[]>(); // teamExt -> personExt[]
   const playsRole = new Map<string, string>(); // personExt -> role name
-  const partOf = new Map<string, string>(); // team -> parent team
   for (const e of edges) {
     const from = e.from_id ? byUuid.get(String(e.from_id)) : undefined;
     const to = e.to_id ? byUuid.get(String(e.to_id)) : undefined;
@@ -519,9 +575,6 @@ export function paintPlanFromTree(
     ) {
       playsRole.set(fe, to.name);
     }
-    if (e.rel === 'part_of' && from.kind === 'team' && to.kind === 'team') {
-      partOf.set(fe, te);
-    }
     if (e.rel === 'reports_to') {
       connectors.push({ fromExternalId: fe, toExternalId: te });
     }
@@ -535,171 +588,6 @@ export function paintPlanFromTree(
       return ha - hb || a.name.localeCompare(b.name, 'es');
     });
 
-  // —— EQUIPOS ——
-  shapes.push(
-    box(
-      {
-        role: 'title',
-        externalId: 'title-equipos',
-        name: 'EQUIPOS',
-        text: 'EQUIPOS',
-        fillColor: COLOR_TITLE,
-        strokeStyle: 'solid',
-        attrs: { section: 'equipos' },
-      },
-      originX,
-      y,
-      TEAM_W + SHAPE_GAP_X + MEMBER_W,
-      TITLE_H
-    )
-  );
-  y += TITLE_H + SHAPE_GAP_Y;
-
-  if (teams.length === 0) {
-    // fallback mini lane
-    const teamExt = 'gestion-admin';
-    const people = [
-      {
-        ext: 'adrian-eguez',
-        name: 'Adrian Eguez',
-        attrs: {
-          title: 'CEO',
-          email: 'adrian@manticore-labs.cc',
-          affine_user_id: '58eefc79-b154-4202-a83c-9cfe6930c165',
-        } as Record<string, unknown>,
-      },
-      {
-        ext: 'mac-adrian',
-        name: 'Mac Adrian',
-        attrs: { title: 'CTO', email: 'mac@manticore-labs.cc' } as Record<
-          string,
-          unknown
-        >,
-      },
-    ];
-    const teamH =
-      people.length * MEMBER_H + Math.max(0, people.length - 1) * SHAPE_GAP_Y;
-    shapes.push(
-      box(
-        {
-          role: 'team',
-          externalId: teamExt,
-          name: 'Gestión y Administración',
-          text: 'Gestión y\nAdministración',
-          fillColor: COLOR_TEAM,
-          strokeStyle: 'solid',
-          attrs: {},
-        },
-        originX,
-        y,
-        TEAM_W,
-        teamH
-      )
-    );
-    people.forEach((p, i) => {
-      const py = y + i * (MEMBER_H + SHAPE_GAP_Y);
-      shapes.push(
-        box(
-          {
-            role: 'person',
-            externalId: p.ext,
-            name: p.name,
-            text: personCardText(p.name, p.attrs),
-            fillColor: COLOR_OK,
-            strokeStyle: 'solid',
-            attrs: {},
-          },
-          originX + TEAM_W + SHAPE_GAP_X,
-          py,
-          MEMBER_W,
-          MEMBER_H
-        )
-      );
-      connectors.push({ fromExternalId: teamExt, toExternalId: p.ext });
-    });
-    y += teamH + SECTION_GAP;
-  } else {
-    for (const team of teams) {
-      const teamExt = shortId(team.external_id);
-      const memberExts = memberOf.get(teamExt) ?? [];
-      const members = memberExts
-        .map(ext => actors.find(a => shortId(a.external_id) === ext))
-        .filter(Boolean) as NonNullable<(typeof actors)[number]>[];
-      const n = Math.max(1, members.length);
-      const teamH = n * MEMBER_H + (n - 1) * SHAPE_GAP_Y;
-      shapes.push(
-        box(
-          {
-            role: 'team',
-            externalId: teamExt,
-            name: team.name,
-            text: team.name.replace(/ y /g, '\ny '),
-            fillColor: COLOR_TEAM,
-            strokeStyle: 'solid',
-            attrs: { hierarchy: String(team.attrs?.hierarchy ?? '') },
-          },
-          originX,
-          y,
-          TEAM_W,
-          teamH
-        )
-      );
-      if (members.length === 0) {
-        shapes.push(
-          box(
-            {
-              role: 'person',
-              externalId: `${teamExt}-vacant`,
-              name: '(sin miembros)',
-              text: '(sin miembros cargados)',
-              fillColor: COLOR_PROPOSED,
-              strokeStyle: 'dash',
-              attrs: {},
-            },
-            originX + TEAM_W + SHAPE_GAP_X,
-            y,
-            MEMBER_W,
-            MEMBER_H
-          )
-        );
-      } else {
-        members.forEach((person, i) => {
-          const pe = shortId(person.external_id);
-          const py = y + i * (MEMBER_H + SHAPE_GAP_Y);
-          shapes.push(
-            box(
-              {
-                role: 'person',
-                externalId: pe,
-                name: person.name,
-                text: personCardText(
-                  person.name,
-                  person.attrs,
-                  playsRole.get(pe)
-                ),
-                fillColor: COLOR_OK,
-                strokeStyle: 'solid',
-                attrs: {
-                  email: attrStr(person.attrs, 'email'),
-                  affine_user_id: attrStr(person.attrs, 'affine_user_id'),
-                  plane_user_id: attrStr(person.attrs, 'plane_user_id'),
-                  external_id: person.external_id,
-                },
-              },
-              originX + TEAM_W + SHAPE_GAP_X,
-              py,
-              MEMBER_W,
-              MEMBER_H
-            )
-          );
-          connectors.push({ fromExternalId: teamExt, toExternalId: pe });
-        });
-      }
-      y += teamH + SECTION_GAP;
-    }
-  }
-
-  // —— Personas sin equipo ——
   const memberPersonExts = new Set<string>();
   for (const list of memberOf.values()) {
     for (const ext of list) memberPersonExts.add(ext);
@@ -707,77 +595,6 @@ export function paintPlanFromTree(
   const orphans = actors.filter(
     a => a.kind === 'person' && !memberPersonExts.has(shortId(a.external_id))
   );
-  if (orphans.length > 0) {
-    shapes.push(
-      box(
-        {
-          role: 'title',
-          externalId: 'title-orphans',
-          name: 'SIN EQUIPO',
-          text: 'SIN EQUIPO',
-          fillColor: COLOR_TITLE,
-          strokeStyle: 'solid',
-          attrs: { section: 'orphans' },
-        },
-        originX,
-        y,
-        TEAM_W + SHAPE_GAP_X + MEMBER_W,
-        TITLE_H
-      )
-    );
-    y += TITLE_H + SHAPE_GAP_Y;
-    orphans.forEach((person, i) => {
-      const pe = shortId(person.external_id);
-      const py = y + i * (MEMBER_H + SHAPE_GAP_Y);
-      shapes.push(
-        box(
-          {
-            role: 'person',
-            externalId: pe,
-            name: person.name,
-            text: personCardText(person.name, person.attrs, playsRole.get(pe)),
-            fillColor: COLOR_OK,
-            strokeStyle: 'dash',
-            attrs: {
-              email: attrStr(person.attrs, 'email'),
-              affine_user_id: attrStr(person.attrs, 'affine_user_id'),
-              plane_user_id: attrStr(person.attrs, 'plane_user_id'),
-              external_id: person.external_id,
-            },
-          },
-          originX + TEAM_W + SHAPE_GAP_X,
-          py,
-          MEMBER_W,
-          MEMBER_H
-        )
-      );
-    });
-    y +=
-      orphans.length * MEMBER_H +
-      Math.max(0, orphans.length - 1) * SHAPE_GAP_Y +
-      SECTION_GAP;
-  }
-
-  // —— WHY lanes (WHY | WHO… | HOW… | WHAT… stacked per column) ——
-  const whyLaneW = TEAM_W + 40 + SHAPE_GAP_X + LANE_CHILD_W * 3 + COL_GAP * 2;
-  shapes.push(
-    box(
-      {
-        role: 'title',
-        externalId: 'title-why',
-        name: 'WHY',
-        text: 'WHY',
-        fillColor: COLOR_TITLE,
-        strokeStyle: 'solid',
-        attrs: { section: 'why' },
-      },
-      originX,
-      y,
-      whyLaneW,
-      TITLE_H
-    )
-  );
-  y += TITLE_H + SHAPE_GAP_Y;
 
   const whys = artifacts.filter(a => a.kind === 'why');
   const byParent = new Map<string, typeof artifacts>();
@@ -787,7 +604,6 @@ export function paintPlanFromTree(
     list.push(a);
     byParent.set(String(a.parent_id), list);
   }
-
   const whyList =
     whys.length > 0
       ? whys
@@ -804,6 +620,18 @@ export function paintPlanFromTree(
             },
           },
         ];
+  const scenarios = artifacts.filter(a => a.kind === 'scenario');
+
+  const measureCol = (kids: typeof artifacts): number => {
+    let h = 0;
+    for (const child of kids) {
+      h += LANE_CHILD_H + SHAPE_GAP_Y;
+      if (child.body?.needs_human && child.body?.question) {
+        h += LANE_CHILD_H + SHAPE_GAP_Y;
+      }
+    }
+    return Math.max(0, h - SHAPE_GAP_Y);
+  };
 
   const stackColumn = (
     kids: typeof artifacts,
@@ -811,7 +639,7 @@ export function paintPlanFromTree(
     colX: number,
     topY: number,
     parentExt: string
-  ): number => {
+  ): void => {
     let cy = topY;
     for (const child of kids) {
       const ce = child.external_id;
@@ -858,11 +686,249 @@ export function paintPlanFromTree(
         cy += LANE_CHILD_H + SHAPE_GAP_Y;
       }
     }
-    return Math.max(0, cy - topY - SHAPE_GAP_Y);
   };
 
-  for (const why of whyList) {
+  // —— Left column: EQUIPOS (+ SIN EQUIPO) ——
+  let leftY = 0;
+  shapes.push(
+    box(
+      {
+        role: 'title',
+        externalId: 'title-equipos',
+        name: 'EQUIPOS',
+        text: 'EQUIPOS',
+        fillColor: COLOR_TITLE,
+        strokeStyle: 'solid',
+        attrs: { section: 'equipos' },
+      },
+      0,
+      leftY,
+      EQUIPOS_W,
+      TITLE_H
+    )
+  );
+  leftY += TITLE_H + SHAPE_GAP_Y;
+
+  if (teams.length === 0) {
+    const teamExt = 'gestion-admin';
+    const people = [
+      {
+        ext: 'adrian-eguez',
+        name: 'Adrian Eguez',
+        attrs: {
+          title: 'CEO',
+          email: 'adrian@manticore-labs.cc',
+          affine_user_id: '58eefc79-b154-4202-a83c-9cfe6930c165',
+        } as Record<string, unknown>,
+      },
+      {
+        ext: 'mac-adrian',
+        name: 'Mac Adrian',
+        attrs: { title: 'CTO', email: 'mac@manticore-labs.cc' } as Record<
+          string,
+          unknown
+        >,
+      },
+    ];
+    const teamH =
+      people.length * MEMBER_H + Math.max(0, people.length - 1) * SHAPE_GAP_Y;
+    shapes.push(
+      box(
+        {
+          role: 'team',
+          externalId: teamExt,
+          name: 'Gestión y Administración',
+          text: 'Gestión y\nAdministración',
+          fillColor: COLOR_TEAM,
+          strokeStyle: 'solid',
+          attrs: {},
+        },
+        0,
+        leftY,
+        TEAM_W,
+        teamH
+      )
+    );
+    people.forEach((p, i) => {
+      shapes.push(
+        box(
+          {
+            role: 'person',
+            externalId: p.ext,
+            name: p.name,
+            text: personCardText(p.name, p.attrs),
+            fillColor: COLOR_OK,
+            strokeStyle: 'solid',
+            attrs: {},
+          },
+          TEAM_W + SHAPE_GAP_X,
+          leftY + i * (MEMBER_H + SHAPE_GAP_Y),
+          MEMBER_W,
+          MEMBER_H
+        )
+      );
+      connectors.push({ fromExternalId: teamExt, toExternalId: p.ext });
+    });
+    leftY += teamH + SECTION_GAP;
+  } else {
+    for (const team of teams) {
+      const teamExt = shortId(team.external_id);
+      const memberExts = memberOf.get(teamExt) ?? [];
+      const members = memberExts
+        .map(ext => actors.find(a => shortId(a.external_id) === ext))
+        .filter(Boolean) as NonNullable<(typeof actors)[number]>[];
+      const n = Math.max(1, members.length);
+      const teamH = n * MEMBER_H + (n - 1) * SHAPE_GAP_Y;
+      shapes.push(
+        box(
+          {
+            role: 'team',
+            externalId: teamExt,
+            name: team.name,
+            text: team.name.replace(/ y /g, '\ny '),
+            fillColor: COLOR_TEAM,
+            strokeStyle: 'solid',
+            attrs: { hierarchy: String(team.attrs?.hierarchy ?? '') },
+          },
+          0,
+          leftY,
+          TEAM_W,
+          teamH
+        )
+      );
+      if (members.length === 0) {
+        shapes.push(
+          box(
+            {
+              role: 'person',
+              externalId: `${teamExt}-vacant`,
+              name: '(sin miembros)',
+              text: '(sin miembros cargados)',
+              fillColor: COLOR_PROPOSED,
+              strokeStyle: 'dash',
+              attrs: {},
+            },
+            TEAM_W + SHAPE_GAP_X,
+            leftY,
+            MEMBER_W,
+            MEMBER_H
+          )
+        );
+      } else {
+        members.forEach((person, i) => {
+          const pe = shortId(person.external_id);
+          shapes.push(
+            box(
+              {
+                role: 'person',
+                externalId: pe,
+                name: person.name,
+                text: personCardText(
+                  person.name,
+                  person.attrs,
+                  playsRole.get(pe)
+                ),
+                fillColor: COLOR_OK,
+                strokeStyle: 'solid',
+                attrs: {
+                  email: attrStr(person.attrs, 'email'),
+                  affine_user_id: attrStr(person.attrs, 'affine_user_id'),
+                  plane_user_id: attrStr(person.attrs, 'plane_user_id'),
+                  external_id: person.external_id,
+                },
+              },
+              TEAM_W + SHAPE_GAP_X,
+              leftY + i * (MEMBER_H + SHAPE_GAP_Y),
+              MEMBER_W,
+              MEMBER_H
+            )
+          );
+          connectors.push({ fromExternalId: teamExt, toExternalId: pe });
+        });
+      }
+      leftY += teamH + SECTION_GAP;
+    }
+  }
+
+  if (orphans.length > 0) {
+    shapes.push(
+      box(
+        {
+          role: 'title',
+          externalId: 'title-orphans',
+          name: 'SIN EQUIPO',
+          text: 'SIN EQUIPO',
+          fillColor: COLOR_TITLE,
+          strokeStyle: 'solid',
+          attrs: { section: 'orphans' },
+        },
+        0,
+        leftY,
+        EQUIPOS_W,
+        TITLE_H
+      )
+    );
+    leftY += TITLE_H + SHAPE_GAP_Y;
+    orphans.forEach((person, i) => {
+      const pe = shortId(person.external_id);
+      shapes.push(
+        box(
+          {
+            role: 'person',
+            externalId: pe,
+            name: person.name,
+            text: personCardText(person.name, person.attrs, playsRole.get(pe)),
+            fillColor: COLOR_OK,
+            strokeStyle: 'dash',
+            attrs: {
+              email: attrStr(person.attrs, 'email'),
+              affine_user_id: attrStr(person.attrs, 'affine_user_id'),
+              plane_user_id: attrStr(person.attrs, 'plane_user_id'),
+              external_id: person.external_id,
+            },
+          },
+          TEAM_W + SHAPE_GAP_X,
+          leftY + i * (MEMBER_H + SHAPE_GAP_Y),
+          MEMBER_W,
+          MEMBER_H
+        )
+      );
+    });
+    leftY +=
+      orphans.length * MEMBER_H +
+      Math.max(0, orphans.length - 1) * SHAPE_GAP_Y +
+      SECTION_GAP;
+  }
+
+  // —— Right of EQUIPOS: WHY1 | WHY2 | … (each with WHO/HOW/WHAT lane) ——
+  const whyOriginX = EQUIPOS_W + SECTION_GAP;
+  const whyCount = Math.max(1, whyList.length);
+  const whyBandW =
+    whyCount * WHY_LANE_W + Math.max(0, whyCount - 1) * SECTION_GAP;
+
+  shapes.push(
+    box(
+      {
+        role: 'title',
+        externalId: 'title-why',
+        name: 'WHY',
+        text: 'WHY',
+        fillColor: COLOR_TITLE,
+        strokeStyle: 'solid',
+        attrs: { section: 'why' },
+      },
+      whyOriginX,
+      0,
+      whyBandW,
+      TITLE_H
+    )
+  );
+
+  let whyContentBottom = TITLE_H + SHAPE_GAP_Y;
+  whyList.forEach((why, wi) => {
     const whyExt = why.external_id;
+    const laneX = whyOriginX + wi * (WHY_LANE_W + SECTION_GAP);
+    const laneY = TITLE_H + SHAPE_GAP_Y;
     const children = why.id
       ? (byParent.get(String(why.id)) ?? [])
       : artifacts.filter(
@@ -875,20 +941,6 @@ export function paintPlanFromTree(
     const howKids = children.filter(c => c.kind === 'how');
     const whatKids = children.filter(c => c.kind === 'what');
     const needsQ = Boolean(why.body?.needs_human && why.body?.question);
-
-    const colX0 = originX + TEAM_W + 40 + SHAPE_GAP_X;
-    // Measure column heights with a dry pass on copies of counters via stack after WHY box.
-    // First compute heights with temporary y, then place WHY with max height.
-    const measureCol = (kids: typeof artifacts): number => {
-      let h = 0;
-      for (const child of kids) {
-        h += LANE_CHILD_H + SHAPE_GAP_Y;
-        if (child.body?.needs_human && child.body?.question) {
-          h += LANE_CHILD_H + SHAPE_GAP_Y;
-        }
-      }
-      return Math.max(0, h - SHAPE_GAP_Y);
-    };
     let laneH = Math.max(
       LANE_CHILD_H,
       measureCol(whoKids),
@@ -911,20 +963,21 @@ export function paintPlanFromTree(
           strokeStyle: 'dash',
           attrs: { statement: String(why.body?.statement ?? '') },
         },
-        originX,
-        y,
-        TEAM_W + 40,
+        laneX,
+        laneY,
+        WHY_CARD_W,
         laneH
       )
     );
 
-    stackColumn(whoKids, 'who', colX0, y, whyExt);
-    stackColumn(howKids, 'how', colX0 + LANE_CHILD_W + COL_GAP, y, whyExt);
+    const colX0 = laneX + WHY_CARD_W + SHAPE_GAP_X;
+    stackColumn(whoKids, 'who', colX0, laneY, whyExt);
+    stackColumn(howKids, 'how', colX0 + LANE_CHILD_W + COL_GAP, laneY, whyExt);
     stackColumn(
       whatKids,
       'what',
       colX0 + (LANE_CHILD_W + COL_GAP) * 2,
-      y,
+      laneY,
       whyExt
     );
 
@@ -942,7 +995,7 @@ export function paintPlanFromTree(
             attrs: { question: String(why.body?.question ?? '') },
           },
           colX0,
-          y + laneH - LANE_CHILD_H,
+          laneY + laneH - LANE_CHILD_H,
           LANE_CHILD_W * 2 + COL_GAP,
           LANE_CHILD_H
         )
@@ -950,11 +1003,12 @@ export function paintPlanFromTree(
       connectors.push({ fromExternalId: whyExt, toExternalId: qExt });
     }
 
-    y += laneH + SECTION_GAP;
-  }
+    whyContentBottom = Math.max(whyContentBottom, laneY + laneH);
+  });
 
-  // —— SCENARIOS (Gherkin) ——
-  const scenarios = artifacts.filter(a => a.kind === 'scenario');
+  // —— SCENARIOS under the taller of left / why band ——
+  let belowY = Math.max(leftY, whyContentBottom) + SECTION_GAP;
+  const fullW = EQUIPOS_W + SECTION_GAP + whyBandW;
   if (scenarios.length > 0) {
     shapes.push(
       box(
@@ -967,19 +1021,18 @@ export function paintPlanFromTree(
           strokeStyle: 'solid',
           attrs: { section: 'scenarios' },
         },
-        originX,
-        y,
-        whyLaneW,
+        0,
+        belowY,
+        fullW,
         TITLE_H
       )
     );
-    y += TITLE_H + SHAPE_GAP_Y;
-    const scenW = Math.floor((whyLaneW - COL_GAP) / 2);
+    belowY += TITLE_H + SHAPE_GAP_Y;
+    const cols = Math.min(3, Math.max(1, scenarios.length));
+    const scenW = Math.floor((fullW - COL_GAP * (cols - 1)) / cols);
     scenarios.forEach((sc, i) => {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const sx = originX + col * (scenW + COL_GAP);
-      const sy = y + row * (LANE_CHILD_H + SHAPE_GAP_Y);
+      const col = i % cols;
+      const row = Math.floor(i / cols);
       const label = sc.body?.label || sc.external_id;
       shapes.push(
         box(
@@ -992,8 +1045,8 @@ export function paintPlanFromTree(
             strokeStyle: 'solid',
             attrs: { statement: String(sc.body?.statement ?? '') },
           },
-          sx,
-          sy,
+          col * (scenW + COL_GAP),
+          belowY + row * (LANE_CHILD_H + SHAPE_GAP_Y),
           scenW,
           LANE_CHILD_H
         )
@@ -1010,6 +1063,13 @@ export function paintPlanFromTree(
         }
       }
     });
+  }
+
+  // Place whole map to the left of foreign content (notes/images/shapes).
+  if (foreignLeft != null) {
+    const bounds = planBounds(shapes);
+    const dx = foreignLeft - FOREIGN_GAP - bounds.maxX;
+    shiftShapes(shapes, dx, 0);
   }
 
   for (const s of shapes) {

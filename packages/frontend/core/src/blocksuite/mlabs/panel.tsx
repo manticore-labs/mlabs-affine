@@ -211,10 +211,36 @@ export async function paintPeople(
   const notes = (store?.getModelsByFlavour?.('affine:note') ?? []) as Array<{
     xywh?: string;
   }>;
+  // Foreign = notes + surface elements that are not ours (images, embeds, hand shapes).
+  const foreignXywhs: Array<string | undefined> = notes.map(note => note.xywh);
+  const pushForeignXywh = (raw: unknown) => {
+    if (typeof raw === 'string') foreignXywhs.push(raw);
+  };
+  for (const model of surface.elementModels ?? []) {
+    const attrs = readAttrs(model.yMap?.get('mlabsAttrs'));
+    const node: CanvasNode = {
+      id: model.id,
+      ...attrs,
+      text: readText(model.yMap?.get('text') ?? model.text),
+    };
+    if (isOwnNode(node) || node.role === 'connector') continue;
+    pushForeignXywh(model.yMap?.get('xywh'));
+    pushForeignXywh((model as { xywh?: unknown }).xywh);
+  }
+  surface.elements?.getValue?.().forEach((element, id) => {
+    const attrs = readAttrs(element.get?.('mlabsAttrs'));
+    const node: CanvasNode = {
+      id,
+      ...attrs,
+      text: readText(element.get?.('text')),
+    };
+    if (isOwnNode(node) || node.role === 'connector') return;
+    pushForeignXywh(element.get?.('xywh'));
+  });
   const tree = await fetchRegistryTree(fetchImpl);
   const { shapes, connectors } = paintPlanFromTree(
     tree,
-    foreignMinX(notes.map(note => note.xywh))
+    foreignMinX(foreignXywhs)
   );
   const elements = surface.elements?.getValue?.();
   for (const node of collectNodes(surface)) {

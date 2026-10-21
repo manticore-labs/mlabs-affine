@@ -6,6 +6,7 @@ import {
   canonicalPageUrl,
   changeLabel,
   emptyWhy,
+  FOREIGN_GAP,
   foreignMinX,
   humanBridgeError,
   indexingNotice,
@@ -16,6 +17,7 @@ import {
   paintPlan,
   paintPlanFromTree,
   personCardText,
+  planBounds,
   readDatasetId,
   readWhy,
   runOnStore,
@@ -115,7 +117,7 @@ test('the WHY contract is stored on the page document', () => {
   assert.equal(stored.okr_alignment, 'OKR Q4');
 });
 
-test('lane layout: EQUIPOS title + team height from members + WHY lanes', () => {
+test('lane layout: EQUIPOS left + WHYs horizontal to the right', () => {
   assert.equal(foreignMinX([]), null);
   const empty = paintPlan(null);
   assert.ok(empty.shapes.some(s => s.role === 'title' && s.name === 'EQUIPOS'));
@@ -182,6 +184,16 @@ test('lane layout: EQUIPOS title + team height from members + WHY lanes', () => 
           },
         },
         {
+          id: 'w2',
+          external_id: 'why-calidad',
+          kind: 'why',
+          body: {
+            label: 'Calidad',
+            statement: 'Menos bugs',
+            needs_human: false,
+          },
+        },
+        {
           id: 'who1',
           external_id: 'who-tiempo',
           kind: 'who',
@@ -208,16 +220,47 @@ test('lane layout: EQUIPOS title + team height from members + WHY lanes', () => 
   );
   const team = tree.shapes.find(s => s.role === 'team');
   assert.ok(team);
-  // 2 members → height = 2*168 + 20
-  assert.match(team!.xywh, /\[.*,.*,160,356\]/);
+  // 2 members → height = 2*168 + 20; equipos start at x=0
+  assert.match(team!.xywh, /^\[0,.*,160,356\]/);
   assert.ok(tree.shapes.some(s => s.text.includes('📧 adrian@')));
   assert.ok(tree.shapes.some(s => s.role === 'question'));
-  // Yellow WHY card must not repeat the "WHY" prefix in the body label
-  const whyCard = tree.shapes.find(s => s.role === 'why');
-  assert.ok(whyCard);
-  assert.equal(whyCard!.text.startsWith('WHY'), false);
-  assert.ok(whyCard!.color === '#141414' || whyCard!.padding?.[0] >= 16);
+  const whyCards = tree.shapes.filter(s => s.role === 'why');
+  assert.equal(whyCards.length, 2);
+  assert.equal(whyCards[0]!.text.startsWith('WHY'), false);
+  // Second WHY must sit to the right of the first
+  const x1 = Number(whyCards[0]!.xywh.match(/^\[(-?\d+)/)?.[1]);
+  const x2 = Number(whyCards[1]!.xywh.match(/^\[(-?\d+)/)?.[1]);
+  assert.ok(x2 > x1);
+  // WHY band starts to the right of EQUIPOS column
+  assert.ok(x1 > 160);
   assert.ok(tree.connectors.some(c => c.fromExternalId === 'gestion-admin'));
+
+  // Foreign content: map right edge + FOREIGN_GAP == foreignLeft
+  const shifted = paintPlanFromTree(
+    {
+      actors: [
+        {
+          id: 't1',
+          external_id: 'mlabs:t',
+          kind: 'team',
+          name: 'T',
+          attrs: { hierarchy: 1 },
+        },
+      ],
+      edges: [],
+      artifacts: [
+        {
+          id: 'w1',
+          external_id: 'why-a',
+          kind: 'why',
+          body: { label: 'A', statement: 'a' },
+        },
+      ],
+    },
+    5000
+  );
+  const bounds = planBounds(shifted.shapes);
+  assert.equal(bounds.maxX + FOREIGN_GAP, 5000);
 });
 
 test('store.transact keeps its this when painting', () => {

@@ -11,6 +11,8 @@ import {
   humanBridgeError,
   indexingNotice,
   isOwnNode,
+  matchFeedbackExternalId,
+  normalizeExtId,
   openRequestBody,
   type PageDoc,
   paintPlanFromTree,
@@ -420,7 +422,7 @@ export function DifySourcesPanel({
         for (const a of tree?.actors ?? []) {
           if (a.external_id.includes('smoke')) continue;
           nodes.push({
-            externalId: a.external_id.replace(/^mlabs:/, ''),
+            externalId: normalizeExtId(a.external_id),
             kind: a.kind,
             label: a.name,
             statement: '',
@@ -428,23 +430,22 @@ export function DifySourcesPanel({
         }
         for (const art of tree?.artifacts ?? []) {
           nodes.push({
-            externalId: art.external_id,
+            externalId: normalizeExtId(art.external_id),
             kind: art.kind,
             label: art.body?.label || art.kind.toUpperCase(),
             statement: String(art.body?.statement ?? ''),
           });
         }
         setFeedbackNodes(nodes);
+        // Prefer the card selected on the canvas; only fall back if none matched.
         const preferred =
-          (initialFeedbackId &&
-            nodes.find(
-              n =>
-                n.externalId === initialFeedbackId ||
-                n.externalId === initialFeedbackId.replace(/^mlabs:/, '') ||
-                `mlabs:${n.externalId}` === initialFeedbackId
-            )?.externalId) ||
-          nodes[0]?.externalId;
+          matchFeedbackExternalId(nodes, initialFeedbackId) ||
+          (initialFeedbackId ? undefined : nodes[0]?.externalId);
         if (preferred) setFeedbackPick(preferred);
+        else if (initialFeedbackId && nodes[0]) {
+          // Had a selection but id not in list — leave blank so UI doesn't lie.
+          setFeedbackPick('');
+        }
       } catch {
         /* feedback list is best-effort; user can retry via select focus */
       }
@@ -891,7 +892,7 @@ export function DifySourcesPanel({
                           for (const a of tree?.actors ?? []) {
                             if (a.external_id.includes('smoke')) continue;
                             nodes.push({
-                              externalId: a.external_id.replace(/^mlabs:/, ''),
+                              externalId: normalizeExtId(a.external_id),
                               kind: a.kind,
                               label: a.name,
                               statement: '',
@@ -899,14 +900,18 @@ export function DifySourcesPanel({
                           }
                           for (const art of tree?.artifacts ?? []) {
                             nodes.push({
-                              externalId: art.external_id,
+                              externalId: normalizeExtId(art.external_id),
                               kind: art.kind,
                               label: art.body?.label || art.kind.toUpperCase(),
                               statement: String(art.body?.statement ?? ''),
                             });
                           }
                           setFeedbackNodes(nodes);
-                          if (nodes[0] && !feedbackPick) {
+                          const preferred =
+                            matchFeedbackExternalId(nodes, initialFeedbackId) ||
+                            matchFeedbackExternalId(nodes, feedbackPick);
+                          if (preferred) setFeedbackPick(preferred);
+                          else if (nodes[0] && !feedbackPick) {
                             setFeedbackPick(nodes[0].externalId);
                           }
                         }).catch(() => {
@@ -998,10 +1003,9 @@ export function DifySourcesPanel({
                   <p className={styles.lead}>
                     Pinta el caso desde el registry (equipos + bandas
                     WHY→WHO→HOW→WHAT→SCENARIOS). Comentario a Dify: seleccioná
-                    una carta en el lienzo → toolbar <code>💬 Comentario</code>,
-                    o slash <code>💬 Comentario Mlabs</code>. No hay icono
-                    pintado dentro de cada shape (limitación del toolbar de
-                    Affine).
+                    una carta en el lienzo → toolbar <code>💬 mlabs</code>, o
+                    slash <code>💬 Comentario Mlabs</code>. El nodo del modal se
+                    preselecciona desde la carta (también en mobile).
                   </p>
                   <div className={styles.actions}>
                     <Button

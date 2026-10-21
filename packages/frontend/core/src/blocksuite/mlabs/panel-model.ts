@@ -1,6 +1,28 @@
 export const PAGE_FILE_NAME = 'mlabs-page.txt';
 export const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
+/** Strip mlabs: so canvas short ids and registry full ids compare equal. */
+export function normalizeExtId(id: string): string {
+  return id.replace(/^mlabs:/, '');
+}
+
+/** Pick the option value that matches a canvas/toolbar external id. */
+export function matchFeedbackExternalId(
+  nodes: Array<{ externalId: string }>,
+  wanted: string | undefined
+): string | undefined {
+  if (!wanted) return undefined;
+  const want = normalizeExtId(wanted);
+  const hit = nodes.find(
+    n =>
+      n.externalId === wanted ||
+      normalizeExtId(n.externalId) === want ||
+      n.externalId === want ||
+      `mlabs:${normalizeExtId(n.externalId)}` === wanted
+  );
+  return hit?.externalId;
+}
+
 const ALLOWED_EXTENSIONS = new Set([
   'csv',
   'doc',
@@ -339,7 +361,8 @@ export type RegistryTree = {
   }>;
 };
 
-const COLOR_OK = '#3cbc36';
+/** Person cards in EQUIPOS — cool indigo (Teams-adjacent), not neon green. */
+const COLOR_PERSON = '#5b6bc0';
 const COLOR_TITLE = '#2a2a2a';
 /** Default team fill; real trees cycle TEAM_PALETTE by hierarchy index. */
 const COLOR_TEAM = '#1f6f4a';
@@ -469,6 +492,7 @@ function textOn(fill: string): string {
   const darkFills = new Set<string>([
     COLOR_TITLE,
     COLOR_TEAM,
+    COLOR_PERSON,
     COLOR_Q,
     COLOR_WHY,
     COLOR_WHO,
@@ -823,7 +847,7 @@ export function paintPlanFromTree(
             externalId: p.ext,
             name: p.name,
             text: personCardText(p.name, p.attrs),
-            fillColor: COLOR_OK,
+            fillColor: COLOR_PERSON,
             strokeStyle: 'solid',
             attrs: {},
           },
@@ -922,7 +946,7 @@ export function paintPlanFromTree(
                 externalId: pe,
                 name: person.name,
                 text: texts[i] ?? person.name,
-                fillColor: COLOR_OK,
+                fillColor: COLOR_PERSON,
                 strokeStyle: 'solid',
                 attrs: {
                   email: attrStr(person.attrs, 'email'),
@@ -975,7 +999,7 @@ export function paintPlanFromTree(
             externalId: pe,
             name: person.name,
             text,
-            fillColor: COLOR_OK,
+            fillColor: COLOR_PERSON,
             strokeStyle: 'dash',
             attrs: {
               email: attrStr(person.attrs, 'email'),

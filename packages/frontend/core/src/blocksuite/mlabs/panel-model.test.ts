@@ -294,6 +294,12 @@ test('bands: EQUIPOS | WHY | WHO | HOW | WHAT + foreign gap', () => {
   assert.ok(
     ![whyFill, whoFill, howFill, whatFill, scenFill].includes(teamFillColor!)
   );
+  const personFill = tree.shapes.find(s => s.role === 'person')?.fillColor;
+  assert.ok(personFill);
+  // No neon green on people; indigo distinct from team + WHO lane
+  assert.notEqual(personFill, '#3cbc36');
+  assert.notEqual(personFill, teamFillColor);
+  assert.notEqual(personFill, whoFill);
 
   const shifted = paintPlanFromTree(
     {

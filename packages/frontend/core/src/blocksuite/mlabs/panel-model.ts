@@ -260,8 +260,13 @@ export const EQUIPOS_W = TEAM_W + SHAPE_GAP_X + MEMBER_W;
 export const SHAPE_PAD: [number, number] = [22, 28];
 export const COLOR_TEXT_LIGHT = '#f5f5f5';
 export const COLOR_TEXT_DARK = '#141414';
-const LINE_H = 16;
-const CHAR_W = 7;
+/**
+ * Affine shape default is Inter 16 with lineGap — DOM wrap is wider/taller than
+ * a naive monospace guess. CHAR_W≈9.5–10px avg; LINE_H covers ascent+gap.
+ * Underestimating either → text overflows the painted xywh (recurrent).
+ */
+export const LINE_H = 24;
+export const CHAR_W = 10;
 
 export type CanvasNode = {
   id: string;
@@ -336,19 +341,32 @@ export type RegistryTree = {
 
 const COLOR_OK = '#3cbc36';
 const COLOR_TITLE = '#2a2a2a';
+/** Default team fill; real trees cycle TEAM_PALETTE by hierarchy index. */
 const COLOR_TEAM = '#1f6f4a';
-/** HITL accent (only non-green family — alerts). */
+/**
+ * Distinct team fills (Teams-style): one hue per squad so EQUIPOS reads as
+ * separate groups, not one green slab. Cycles if more teams than slots.
+ */
+const TEAM_PALETTE = [
+  '#1f6f4a', // forest
+  '#2b6cb0', // blue
+  '#2f855a', // emerald
+  '#553c9a', // indigo
+  '#b7791f', // amber
+  '#2c7a7b', // teal
+] as const;
+/** HITL accent (alerts only). */
 const COLOR_Q = '#c45c26';
 /**
- * Lane palette: analogous cool progression from team green (#1f6f4a / #3cbc36).
- * Same chroma family, hue shifts WHY→WHO→HOW→WHAT→SCENARIO (left→right process).
- * Derived as a continuous green→teal scale (not unrelated primaries).
+ * Lane palette (professional, readable on light canvas):
+ * HOW/WHAT kept (teal family — approved). WHY/WHO retinted away from lime.
+ * SCENARIOS = distinct violet (BDD Z4, not another teal).
  */
-const COLOR_WHY = '#c5d67a'; // yellow-green (light goal)
-const COLOR_WHO = '#7cbc8a'; // soft green (actors in ecosystem)
-const COLOR_HOW = '#4fa892'; // teal-green (activities)
-const COLOR_WHAT = '#3d8f9a'; // blue-teal (deliverables)
-const COLOR_SCENARIO = '#2f6d78'; // deep teal (BDD / Z4)
+const COLOR_WHY = '#6b9bd1'; // sky — goals / vision
+const COLOR_WHO = '#4a7fb5'; // steel blue — actors
+const COLOR_HOW = '#4fa892'; // teal-green (activities) — kept
+const COLOR_WHAT = '#3d8f9a'; // blue-teal (deliverables) — kept
+const COLOR_SCENARIO = '#6b4c9a'; // violet — Gherkin / Z4 (distinct)
 /** @deprecated alias — use laneFill('why') */
 const COLOR_PROPOSED = COLOR_WHY;
 
@@ -375,6 +393,20 @@ export function methodologyCardText(
   return `${clean}\n${body}`;
 }
 
+/**
+ * Visual length for wrap estimates: emoji / wide glyphs ≈ 2× Latin.
+ * JS string.length undercounts ❓/emoji vs Affine Inter metrics.
+ */
+export function visualLen(text: string): number {
+  let n = 0;
+  for (const ch of text || '') {
+    const cp = ch.codePointAt(0) ?? 0;
+    // BMP Latin/punct ≈ 1; emoji, symbols, CJK ≈ 2
+    n += cp > 0xff || ch === '❓' ? 2 : 1;
+  }
+  return Math.max(1, n);
+}
+
 /** Height so text + padding fits; never smaller than minH. */
 export function cardHeightForText(
   text: string,
@@ -385,7 +417,7 @@ export function cardHeightForText(
   const charsPerLine = Math.max(8, Math.floor(innerW / CHAR_W));
   let lines = 0;
   for (const line of (text || ' ').split('\n')) {
-    lines += Math.max(1, Math.ceil(Math.max(1, line.length) / charsPerLine));
+    lines += Math.max(1, Math.ceil(visualLen(line) / charsPerLine));
   }
   return Math.max(minH, SHAPE_PAD[0] * 2 + lines * LINE_H + 8);
 }
@@ -398,10 +430,16 @@ export function cardWidthForText(
 ): number {
   let longest = 1;
   for (const line of (text || ' ').split('\n')) {
-    longest = Math.max(longest, line.length);
+    longest = Math.max(longest, visualLen(line));
   }
   const ideal = SHAPE_PAD[1] * 2 + longest * CHAR_W;
   return Math.min(maxW, Math.max(minW, ideal));
+}
+
+export function teamFill(index: number): string {
+  const i =
+    ((index % TEAM_PALETTE.length) + TEAM_PALETTE.length) % TEAM_PALETTE.length;
+  return TEAM_PALETTE[i] ?? COLOR_TEAM;
 }
 
 function stackHeight(
@@ -428,13 +466,16 @@ export function laneFill(kind: 'why' | 'who' | 'how' | 'what'): string {
 }
 
 function textOn(fill: string): string {
-  const darkFills = new Set([
+  const darkFills = new Set<string>([
     COLOR_TITLE,
     COLOR_TEAM,
     COLOR_Q,
+    COLOR_WHY,
+    COLOR_WHO,
     COLOR_HOW,
     COLOR_WHAT,
     COLOR_SCENARIO,
+    ...TEAM_PALETTE,
   ]);
   return darkFills.has(fill) ? COLOR_TEXT_LIGHT : COLOR_TEXT_DARK;
 }
@@ -762,7 +803,7 @@ export function paintPlanFromTree(
           externalId: teamExt,
           name: 'Gestión y Administración',
           text: 'Gestión y\nAdministración',
-          fillColor: COLOR_TEAM,
+          fillColor: teamFill(0),
           strokeStyle: 'solid',
           attrs: {},
         },
@@ -797,8 +838,9 @@ export function paintPlanFromTree(
     });
     leftY += teamH + SECTION_GAP;
   } else {
-    for (const team of teams) {
+    teams.forEach((team, teamIdx) => {
       const teamExt = shortId(team.external_id);
+      const teamColor = teamFill(teamIdx);
       const memberExts = memberOf.get(teamExt) ?? [];
       const members = memberExts
         .map(ext => actors.find(a => shortId(a.external_id) === ext))
@@ -813,7 +855,7 @@ export function paintPlanFromTree(
               externalId: teamExt,
               name: team.name,
               text: team.name.replace(/ y /g, '\ny '),
-              fillColor: COLOR_TEAM,
+              fillColor: teamColor,
               strokeStyle: 'solid',
               attrs: { hierarchy: String(team.attrs?.hierarchy ?? '') },
             },
@@ -859,7 +901,7 @@ export function paintPlanFromTree(
               externalId: teamExt,
               name: team.name,
               text: team.name.replace(/ y /g, '\ny '),
-              fillColor: COLOR_TEAM,
+              fillColor: teamColor,
               strokeStyle: 'solid',
               attrs: { hierarchy: String(team.attrs?.hierarchy ?? '') },
             },
@@ -900,7 +942,7 @@ export function paintPlanFromTree(
         });
         leftY += teamH + SECTION_GAP;
       }
-    }
+    });
   }
 
   if (orphans.length > 0) {

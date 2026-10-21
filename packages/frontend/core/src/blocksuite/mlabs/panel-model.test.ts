@@ -4,13 +4,17 @@ import { test } from 'node:test';
 
 import {
   canonicalPageUrl,
+  cardHeightForText,
+  cardWidthForText,
   changeLabel,
+  CHAR_W,
   emptyWhy,
   FOREIGN_GAP,
   foreignMinX,
   humanBridgeError,
   indexingNotice,
   isDocumentIndexing,
+  LINE_H,
   openRequestBody,
   type PageDoc,
   paintPlan,
@@ -20,9 +24,11 @@ import {
   readDatasetId,
   readWhy,
   runOnStore,
+  SHAPE_PAD,
   statusLabel,
   syncSummaryLabel,
   uploadRejection,
+  visualLen,
   whyRejection,
   writeDatasetId,
   writeWhy,
@@ -275,8 +281,19 @@ test('bands: EQUIPOS | WHY | WHO | HOW | WHAT + foreign gap', () => {
   const whoFill = tree.shapes.find(s => s.role === 'who')?.fillColor;
   const howFill = tree.shapes.find(s => s.role === 'how')?.fillColor;
   const whatFill = tree.shapes.find(s => s.role === 'what')?.fillColor;
-  assert.ok(whyFill && whoFill && howFill && whatFill);
-  assert.equal(new Set([whyFill, whoFill, howFill, whatFill]).size, 4);
+  const scenFill = tree.shapes.find(s => s.role === 'scenario')?.fillColor;
+  assert.ok(whyFill && whoFill && howFill && whatFill && scenFill);
+  assert.equal(
+    new Set([whyFill, whoFill, howFill, whatFill, scenFill]).size,
+    5
+  );
+  // SCENARIOS must not reuse teal lane fills
+  assert.ok(![howFill, whatFill].includes(scenFill!));
+  const teamFillColor = tree.shapes.find(s => s.role === 'team')?.fillColor;
+  assert.ok(teamFillColor);
+  assert.ok(
+    ![whyFill, whoFill, howFill, whatFill, scenFill].includes(teamFillColor!)
+  );
 
   const shifted = paintPlanFromTree(
     {
@@ -303,6 +320,79 @@ test('bands: EQUIPOS | WHY | WHO | HOW | WHAT + foreign gap', () => {
   );
   const bounds = planBounds(shifted.shapes);
   assert.equal(bounds.maxX + FOREIGN_GAP, 8000);
+});
+
+test('card sizing covers long Gherkin + emoji without underestimating', () => {
+  assert.ok(visualLen('❓ SLA?') > 'SLA?'.length);
+  assert.equal(CHAR_W >= 9, true);
+  assert.equal(LINE_H >= 22, true);
+
+  const short = 'Mesa';
+  const wShort = cardWidthForText(short, 200, 420);
+  assert.ok(wShort >= 200);
+  assert.ok(wShort <= 420);
+
+  const gherkin = [
+    'Feature: board drag ticket across columns',
+    'Scenario: agent moves card to Doing',
+    'Given a ticket in Backlog with owner assigned',
+    'When the agent drags it onto the Doing column',
+    'Then the status updates and SLA clock starts',
+    '↳ WHAT: Lienzo',
+  ].join('\n');
+  const w = cardWidthForText(gherkin, 200, 420);
+  const h = cardHeightForText(gherkin, w, 128);
+  const lines = gherkin.split('\n').reduce((acc, line) => {
+    const inner = Math.max(40, w - SHAPE_PAD[1] * 2);
+    const cpl = Math.max(8, Math.floor(inner / CHAR_W));
+    return acc + Math.max(1, Math.ceil(visualLen(line) / cpl));
+  }, 0);
+  const minExpected = SHAPE_PAD[0] * 2 + lines * LINE_H + 8;
+  assert.ok(h >= minExpected, `h=${h} < expected ${minExpected}`);
+  assert.ok(h > 128, 'long Gherkin must grow past LANE_CHILD_H');
+
+  const q = '❓ ¿Confirmamos el SLA de respuesta en <15m para P1?';
+  const qw = cardWidthForText(q, 200, 420);
+  const qh = cardHeightForText(q, qw, 128);
+  assert.ok(qh >= cardHeightForText(q.replace('❓ ', ''), qw, 128));
+});
+
+test('distinct team fills cycle across squads', () => {
+  const tree = paintPlanFromTree(
+    {
+      actors: [
+        {
+          id: 't1',
+          external_id: 'mlabs:t1',
+          kind: 'team',
+          name: 'Alpha',
+          attrs: { hierarchy: 1 },
+        },
+        {
+          id: 't2',
+          external_id: 'mlabs:t2',
+          kind: 'team',
+          name: 'Beta',
+          attrs: { hierarchy: 2 },
+        },
+        {
+          id: 't3',
+          external_id: 'mlabs:t3',
+          kind: 'team',
+          name: 'Gamma',
+          attrs: { hierarchy: 3 },
+        },
+      ],
+      edges: [],
+      artifacts: [],
+    },
+    null
+  );
+  const fills = tree.shapes
+    .filter(s => s.role === 'team')
+    .map(s => s.fillColor);
+  assert.equal(fills.length, 3);
+  assert.equal(new Set(fills).size, 3);
 });
 
 test('store.transact keeps its this when painting', () => {

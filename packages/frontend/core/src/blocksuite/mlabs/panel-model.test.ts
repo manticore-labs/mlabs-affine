@@ -9,6 +9,7 @@ import {
   changeLabel,
   CHAR_W,
   emptyWhy,
+  engagementExternalId,
   FOREIGN_GAP,
   foreignMinX,
   humanBridgeError,
@@ -30,6 +31,7 @@ import {
   uploadRejection,
   visualLen,
   whyRejection,
+  workspaceIdFromPageUrl,
   writeDatasetId,
   writeWhy,
 } from './panel-model.ts';
@@ -57,6 +59,30 @@ test('the open body carries the page, the url and the stored id', () => {
     '{"command":"mlabs-framework","page_id":"page-1","page_url":"https://affine-pampa.manticore-labs.cc/workspace/w/page-1","dataset_id":"68080011-1111-4111-8111-111111111111"}'
   );
   assert.equal(canonicalPageUrl('javascript:alert(1)'), undefined);
+});
+
+test('R0 engagement external_id is affine:workspace:page (not poc-s1)', () => {
+  const url = 'https://affine-pampa.manticore-labs.cc/workspace/w/page-1';
+  assert.equal(workspaceIdFromPageUrl(url), 'w');
+  assert.equal(engagementExternalId('page-1', url), 'affine:w:page-1');
+  assert.notEqual(engagementExternalId('page-1', url), 'poc-s1');
+});
+
+test('R0 empty engagement tree paints no demo WHY', () => {
+  const plan = paintPlanFromTree(
+    {
+      engagement: { external_id: 'affine:w:page-new' },
+      actors: [],
+      edges: [],
+      artifacts: [],
+    },
+    null
+  );
+  assert.equal(
+    plan.shapes.filter(s => s.role === 'why').length,
+    0,
+    'empty engagement must not inject fallback why-tiempo'
+  );
 });
 
 test('upload rejection covers empty, huge and zip files', () => {

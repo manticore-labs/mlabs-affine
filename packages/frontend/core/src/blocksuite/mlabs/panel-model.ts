@@ -740,6 +740,30 @@ export function canonicalPageUrl(
   return value;
 }
 
+/** Workspace id from Affine URL `/workspace/<ws>/…`. */
+export function workspaceIdFromPageUrl(
+  pageUrl: string | undefined
+): string | undefined {
+  if (!pageUrl) return undefined;
+  try {
+    const u = new URL(pageUrl);
+    const m = u.pathname.match(/\/workspace\/([^/]+)/);
+    return m?.[1] ? decodeURIComponent(m[1]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * SG2-R0 lock: engagement.external_id = affine:<workspaceId>:<pageId>
+ * Never use demo `poc-s1` for page-scoped work.
+ */
+export function engagementExternalId(pageId: string, pageUrl?: string): string {
+  const ws = workspaceIdFromPageUrl(pageUrl) || 'unknown';
+  const page = (pageId || '').trim() || 'unknown-page';
+  return `affine:${ws}:${page}`;
+}
+
 export function openRequestBody(input: {
   pageId: string;
   pageUrl?: string;
@@ -1333,22 +1357,26 @@ export function paintPlanFromTree(
     list.push(a);
     byParent.set(String(a.parent_id), list);
   }
+  // Empty engagement (R0 new page) must stay empty — no demo WHY fallback.
+  // Fallback only when tree is missing entirely (offline / registry down).
   const whyList =
     whys.length > 0
       ? whys
-      : [
-          {
-            id: 'fallback-why',
-            external_id: 'why-tiempo',
-            kind: 'why',
-            body: {
-              label: 'Tiempo',
-              statement: 'Reducir tiempo de decisión.',
-              needs_human: true,
-              question: '¿SLA objetivo en horas?',
+      : tree == null
+        ? [
+            {
+              id: 'fallback-why',
+              external_id: 'why-tiempo',
+              kind: 'why',
+              body: {
+                label: 'Tiempo',
+                statement: 'Reducir tiempo de decisión.',
+                needs_human: true,
+                question: '¿SLA objetivo en horas?',
+              },
             },
-          },
-        ];
+          ]
+        : [];
   const scenarios = artifacts.filter(a => a.kind === 'scenario');
   const artifactById = new Map(
     artifacts.filter(a => a.id).map(a => [String(a.id), a])

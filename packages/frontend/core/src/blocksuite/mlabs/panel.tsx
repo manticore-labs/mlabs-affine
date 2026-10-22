@@ -9,6 +9,7 @@ import {
   buildFeedbackNodes,
   type CanvasNode,
   changeLabel,
+  engagementExternalId,
   foreignMinX,
   humanBridgeError,
   indexingNotice,
@@ -19,17 +20,13 @@ import {
   type PageDoc,
   paintPlanFromTree,
   readDatasetId,
-  readWhy,
   type RegistryTree,
   runOnStore,
   type SourceDocument,
   statusLabel,
   syncSummaryLabel,
   uploadRejection,
-  type WhyDraft,
-  whyRejection,
   writeDatasetId,
-  writeWhy,
 } from './panel-model';
 
 const FRAMEWORK = '/mlabs/framework';
@@ -42,6 +39,7 @@ type OpenResponse = {
   name: string;
   description: string;
   documents: SourceDocument[];
+  engagement_external_id?: string;
 };
 
 type AskSource = {
@@ -95,6 +93,7 @@ export type DifySourcesPanelProps = {
   doc?: PageDoc;
   store?: PaintStore;
   fetchImpl?: FetchLike;
+  /** Legacy `why` is ignored — WHY comes from docs→LangGraph only (SG2-R0). */
   initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar';
   focusFeedback?: boolean;
   /** Pre-select this registry external_id in the 💬 feedback form. */
@@ -198,11 +197,17 @@ function collectNodes(surface: SurfaceModel): CanvasNode[] {
 }
 
 export async function fetchRegistryTree(
-  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis)
+  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis),
+  engagementExtId?: string
 ): Promise<RegistryTree | null> {
+  const key = (engagementExtId || '').trim();
+  if (!key || key === 'poc-s1') {
+    // R0: refuse silent demo seed — caller must pass page engagement.
+    return null;
+  }
   try {
     const response = await fetchImpl(
-      `${REGISTRY}/tree?engagement_external_id=poc-s1`,
+      `${REGISTRY}/tree?engagement_external_id=${encodeURIComponent(key)}`,
       {
         credentials: 'include',
         cache: 'no-store',
@@ -217,7 +222,8 @@ export async function fetchRegistryTree(
 
 export async function paintPeople(
   store: PaintStore | undefined,
-  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis)
+  fetchImpl: FetchLike = globalThis.fetch.bind(globalThis),
+  engagementExtId?: string
 ): Promise<number> {
   const surfaces = (store?.getModelsByFlavour?.('affine:surface') ??
     []) as Array<SurfaceModel & { xywh?: string }>;
@@ -264,7 +270,7 @@ export async function paintPeople(
     if (isOwnNode(node) || node.role === 'connector') return;
     pushForeignXywh(element.get?.('xywh'));
   });
-  const tree = await fetchRegistryTree(fetchImpl);
+  const tree = await fetchRegistryTree(fetchImpl, engagementExtId);
   const { shapes, connectors } = paintPlanFromTree(
     tree,
     foreignMinX(foreignXywhs)
@@ -361,11 +367,17 @@ export function DifySourcesPanel({
   initialFeedbackId,
   onClose,
 }: DifySourcesPanelProps) {
-  const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'why' | 'pintar'>(
-    initialTab
+  const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'pintar'>(
+    initialTab === 'why'
+      ? 'fuentes'
+      : initialTab === 'preguntar' || initialTab === 'pintar'
+        ? initialTab
+        : 'fuentes'
   );
-  const [why, setWhy] = useState<WhyDraft>(() => readWhy(doc));
   const [busy, setBusy] = useState(true);
+  const [engagementId, setEngagementId] = useState(() =>
+    engagementExternalId(pageId, pageUrl)
+  );
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [datasetId, setDatasetId] = useState<string | undefined>(
@@ -417,6 +429,11 @@ export function DifySourcesPanel({
       if (!response.ok) throw new Error(await readBridgeError(response));
       const body = (await response.json()) as OpenResponse;
       remember(body.dataset_id);
+      if (body.engagement_external_id) {
+        setEngagementId(body.engagement_external_id);
+      } else {
+        setEngagementId(engagementExternalId(pageId, pageUrl));
+      }
       setName(body.name);
       setDescription(body.description ?? '');
       setDocuments(body.documents ?? []);
@@ -442,7 +459,7 @@ export function DifySourcesPanel({
     if (!focusFeedback) return;
     const loadFeedbackNodes = async () => {
       try {
-        const tree = await fetchRegistryTree(fetchImpl);
+        const tree = await fetchRegistryTree(fetchImpl, engagementId);
         const nodes = buildFeedbackNodes(tree);
         setFeedbackNodes(nodes);
         // Prefer the card selected on the canvas; never invent the first person.
@@ -456,7 +473,7 @@ export function DifySourcesPanel({
     loadFeedbackNodes().catch(() => {
       /* swallowed above */
     });
-  }, [fetchImpl, focusFeedback, initialFeedbackId]);
+  }, [engagementId, fetchImpl, focusFeedback, initialFeedbackId]);
 
   const run = async (fallback: string, action: () => Promise<void>) => {
     setActionBusy(true);
@@ -531,9 +548,6 @@ export function DifySourcesPanel({
               disabled={!ready}
             >
               Preguntar
-            </Tabs.Trigger>
-            <Tabs.Trigger value="why" className={styles.tabTrigger}>
-              WHY
             </Tabs.Trigger>
             <Tabs.Trigger value="pintar" className={styles.tabTrigger}>
               {focusFeedback ? '💬 Comentario' : 'Pintar'}
@@ -756,117 +770,6 @@ export function DifySourcesPanel({
             </section>
           </Tabs.Content>
 
-          <Tabs.Content value="why">
-            <section className={styles.section}>
-              <p className={styles.lead}>
-                Objetivo de negocio (KPI / costo / ingreso). Sin software ni
-                features. Preferí un indicador leading. Gente, equipos y roles
-                quedan para WHO, después de este WHY.
-              </p>
-              <label className={styles.field}>
-                <span>Objetivo</span>
-                <textarea
-                  className={styles.textarea}
-                  value={why.statement}
-                  maxLength={400}
-                  disabled={!doc || actionBusy}
-                  onChange={event =>
-                    setWhy(current => ({
-                      ...current,
-                      statement: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Tipo de indicador</span>
-                <select
-                  value={why.indicator_type}
-                  disabled={!doc || actionBusy}
-                  onChange={event =>
-                    setWhy(current => ({
-                      ...current,
-                      indicator_type:
-                        event.target.value === 'lagging'
-                          ? 'lagging'
-                          : 'leading',
-                    }))
-                  }
-                >
-                  <option value="leading">Leading</option>
-                  <option value="lagging">Lagging</option>
-                </select>
-              </label>
-              <label className={styles.field}>
-                <span>From</span>
-                <Input
-                  value={why.from}
-                  disabled={!doc || actionBusy}
-                  onChange={value =>
-                    setWhy(current => ({ ...current, from: value }))
-                  }
-                />
-              </label>
-              <label className={styles.field}>
-                <span>To</span>
-                <Input
-                  value={why.to}
-                  disabled={!doc || actionBusy}
-                  onChange={value =>
-                    setWhy(current => ({ ...current, to: value }))
-                  }
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Unidad</span>
-                <Input
-                  value={why.unit}
-                  maxLength={40}
-                  disabled={!doc || actionBusy}
-                  onChange={value =>
-                    setWhy(current => ({ ...current, unit: value }))
-                  }
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Alineación OKR</span>
-                <Input
-                  value={why.okr_alignment}
-                  maxLength={200}
-                  disabled={!doc || actionBusy}
-                  onChange={value =>
-                    setWhy(current => ({ ...current, okr_alignment: value }))
-                  }
-                />
-              </label>
-              <div className={styles.actions}>
-                <Button
-                  variant="primary"
-                  disabled={!doc || actionBusy}
-                  onClick={() => {
-                    const problem = whyRejection(why);
-                    if (problem) {
-                      notify.error({
-                        title: 'Mlabs Framework',
-                        message: problem,
-                      });
-                      return;
-                    }
-                    if (!doc) return;
-                    writeWhy(doc, why);
-                    setWhy(readWhy(doc));
-                    notify.success({
-                      title: 'Mlabs Framework',
-                      message: 'WHY guardado en esta página.',
-                    });
-                  }}
-                >
-                  Guardar WHY
-                </Button>
-              </div>
-            </section>
-          </Tabs.Content>
-
           <Tabs.Content value="pintar">
             <section className={styles.section}>
               {focusFeedback ? (
@@ -885,7 +788,10 @@ export function DifySourcesPanel({
                       onFocus={() => {
                         if (feedbackNodes.length > 0) return;
                         run('No pude cargar nodos.', async () => {
-                          const tree = await fetchRegistryTree(fetchImpl);
+                          const tree = await fetchRegistryTree(
+                            fetchImpl,
+                            engagementId
+                          );
                           const nodes = buildFeedbackNodes(tree);
                           setFeedbackNodes(nodes);
                           const preferred =
@@ -1050,7 +956,7 @@ export function DifySourcesPanel({
                                       ? attachmentNames[0]
                                       : undefined,
                                   attachments: attachmentNames,
-                                  engagement_id: 'poc-s1',
+                                  engagement_id: engagementId,
                                   request_id: crypto.randomUUID(),
                                 }),
                               }
@@ -1097,7 +1003,11 @@ export function DifySourcesPanel({
                       loading={actionBusy}
                       onClick={() =>
                         void run('No pude pintar el lienzo.', async () => {
-                          const count = await paintPeople(store, fetchImpl);
+                          const count = await paintPeople(
+                            store,
+                            fetchImpl,
+                            engagementId
+                          );
                           notify.success({
                             title: 'Mlabs Framework',
                             message: `Pintados ${count} nodos + nota documento sincronizada.`,

@@ -764,6 +764,57 @@ export function engagementExternalId(pageId: string, pageUrl?: string): string {
   return `affine:${ws}:${page}`;
 }
 
+/**
+ * SG2-R6: paint only the page engagement. Refuse empty + demo `poc-s1`.
+ * (Other pages are out of scope because callers pass this page's key.)
+ */
+export function isPaintEngagementAllowed(
+  engagementExtId: string | undefined | null
+): boolean {
+  const key = (engagementExtId || '').trim();
+  return Boolean(key) && key !== 'poc-s1';
+}
+
+/** Stable fingerprint of Impact tree — re-paint when it changes (no accumulate). */
+export function treeImpactFingerprint(
+  tree: RegistryTree | null | undefined
+): string {
+  if (!tree) return '';
+  const arts = (tree.artifacts ?? [])
+    .map(
+      a =>
+        `${a.kind}:${a.external_id}:${a.verification ?? ''}:${a.parent_id ?? ''}`
+    )
+    .sort();
+  const actors = (tree.actors ?? [])
+    .filter(a => !String(a.external_id).includes('smoke'))
+    .map(a => `${a.kind}:${a.external_id}`)
+    .sort();
+  return `a=${actors.join('|')};r=${arts.join('|')}`;
+}
+
+export type AutoPaintDecision =
+  | { paint: true; reason: 'tree-ready' }
+  | {
+      paint: false;
+      reason: 'refuse-poc' | 'refuse-empty-id' | 'no-tree';
+    };
+
+/**
+ * SG2-R6 adapter: decide whether FE should auto-paint Impact from tree.
+ * Empty tree still paints (refresh clears orphan Impact shapes after retract).
+ */
+export function shouldAutoPaint(
+  engagementExtId: string | undefined | null,
+  tree: RegistryTree | null | undefined
+): AutoPaintDecision {
+  const key = (engagementExtId || '').trim();
+  if (!key) return { paint: false, reason: 'refuse-empty-id' };
+  if (key === 'poc-s1') return { paint: false, reason: 'refuse-poc' };
+  if (tree == null) return { paint: false, reason: 'no-tree' };
+  return { paint: true, reason: 'tree-ready' };
+}
+
 export function openRequestBody(input: {
   pageId: string;
   pageUrl?: string;

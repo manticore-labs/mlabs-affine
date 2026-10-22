@@ -1,5 +1,5 @@
 import { Button, Input, Loading, Modal, notify, Tabs } from '@affine/component';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Y from 'yjs';
 
@@ -14,6 +14,7 @@ import {
   humanBridgeError,
   indexingNotice,
   isOwnNode,
+  isPaintEngagementAllowed,
   matchFeedbackExternalId,
   MAX_FEEDBACK_FILES,
   openRequestBody,
@@ -22,9 +23,11 @@ import {
   readDatasetId,
   type RegistryTree,
   runOnStore,
+  shouldAutoPaint,
   type SourceDocument,
   statusLabel,
   syncSummaryLabel,
+  treeImpactFingerprint,
   uploadRejection,
   writeDatasetId,
 } from './panel-model';
@@ -201,8 +204,8 @@ export async function fetchRegistryTree(
   engagementExtId?: string
 ): Promise<RegistryTree | null> {
   const key = (engagementExtId || '').trim();
-  if (!key || key === 'poc-s1') {
-    // R0: refuse silent demo seed — caller must pass page engagement.
+  // R0/R6: refuse silent demo seed — caller must pass page engagement.
+  if (!isPaintEngagementAllowed(key)) {
     return null;
   }
   try {
@@ -225,6 +228,9 @@ export async function paintPeople(
   fetchImpl: FetchLike = globalThis.fetch.bind(globalThis),
   engagementExtId?: string
 ): Promise<number> {
+  if (!isPaintEngagementAllowed(engagementExtId)) {
+    throw new Error('Engagement no permitido para pintar (poc-s1 / vacío).');
+  }
   const surfaces = (store?.getModelsByFlavour?.('affine:surface') ??
     []) as Array<SurfaceModel & { xywh?: string }>;
   if (surfaces.length !== 1 || !surfaces[0].addElement) {
@@ -386,6 +392,9 @@ export function DifySourcesPanel({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [documents, setDocuments] = useState<SourceDocument[]>([]);
+  /** SG2-R6: last auto-painted tree fingerprint (re-paint only on change). */
+  const lastPaintFpRef = useRef('');
+  const autoPaintInFlightRef = useRef(false);
   const [file, setFile] = useState<File | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SourceDocument | null>(
     null
@@ -454,6 +463,48 @@ export function DifySourcesPanel({
     // Open once when the panel mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * SG2-R6: auto-paint Impact via the same path as the Pintar button.
+   * Fail-open: errors never break open/ingest; skip poc-s1; re-paint on fp change.
+   */
+  const tryAutoPaint = useCallback(async () => {
+    if (!store || busy || autoPaintInFlightRef.current) return;
+    if (!isPaintEngagementAllowed(engagementId)) return;
+    autoPaintInFlightRef.current = true;
+    try {
+      const tree = await fetchRegistryTree(fetchImpl, engagementId);
+      const decision = shouldAutoPaint(engagementId, tree);
+      if (!decision.paint) return;
+      const fp = treeImpactFingerprint(tree);
+      if (fp === lastPaintFpRef.current) return;
+      await paintPeople(store, fetchImpl, engagementId);
+      lastPaintFpRef.current = fp;
+    } catch (err) {
+      // Fail-open: auto-paint must not surface as a hard panel failure.
+      console.error('mlabs R6 auto-paint', err);
+    } finally {
+      autoPaintInFlightRef.current = false;
+    }
+  }, [busy, engagementId, fetchImpl, store]);
+
+  useEffect(() => {
+    if (busy) return;
+    tryAutoPaint().catch(() => {
+      /* fail-open already logged inside tryAutoPaint */
+    });
+  }, [busy, tryAutoPaint, documents]);
+
+  // Poll while panel is open so post-R1–R5 sync (ingest) refreshes shapes without click.
+  useEffect(() => {
+    if (busy) return;
+    const id = window.setInterval(() => {
+      tryAutoPaint().catch(() => {
+        /* fail-open */
+      });
+    }, 12_000);
+    return () => window.clearInterval(id);
+  }, [busy, tryAutoPaint]);
 
   useEffect(() => {
     if (!focusFeedback) return;
@@ -1008,6 +1059,11 @@ export function DifySourcesPanel({
                             fetchImpl,
                             engagementId
                           );
+                          const tree = await fetchRegistryTree(
+                            fetchImpl,
+                            engagementId
+                          );
+                          lastPaintFpRef.current = treeImpactFingerprint(tree);
                           notify.success({
                             title: 'Mlabs Framework',
                             message: `Pintados ${count} nodos + nota documento sincronizada.`,

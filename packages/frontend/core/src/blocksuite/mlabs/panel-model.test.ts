@@ -15,6 +15,7 @@ import {
   humanBridgeError,
   indexingNotice,
   isDocumentIndexing,
+  isPaintEngagementAllowed,
   LINE_H,
   openRequestBody,
   type PageDoc,
@@ -26,8 +27,10 @@ import {
   readWhy,
   runOnStore,
   SHAPE_PAD,
+  shouldAutoPaint,
   statusLabel,
   syncSummaryLabel,
+  treeImpactFingerprint,
   uploadRejection,
   visualLen,
   whyRejection,
@@ -66,6 +69,52 @@ test('R0 engagement external_id is affine:workspace:page (not poc-s1)', () => {
   assert.equal(workspaceIdFromPageUrl(url), 'w');
   assert.equal(engagementExternalId('page-1', url), 'affine:w:page-1');
   assert.notEqual(engagementExternalId('page-1', url), 'poc-s1');
+});
+
+test('R6 refuse paint for poc-s1 and empty engagement', () => {
+  assert.equal(isPaintEngagementAllowed('poc-s1'), false);
+  assert.equal(isPaintEngagementAllowed(''), false);
+  assert.equal(isPaintEngagementAllowed('  '), false);
+  assert.equal(isPaintEngagementAllowed(null), false);
+  assert.equal(isPaintEngagementAllowed('affine:w:page-1'), true);
+
+  assert.deepEqual(shouldAutoPaint('poc-s1', { artifacts: [] }), {
+    paint: false,
+    reason: 'refuse-poc',
+  });
+  assert.deepEqual(shouldAutoPaint('', { artifacts: [] }), {
+    paint: false,
+    reason: 'refuse-empty-id',
+  });
+  assert.deepEqual(shouldAutoPaint('affine:w:p', null), {
+    paint: false,
+    reason: 'no-tree',
+  });
+  // Empty tree still paints (re-paint refresh after retract).
+  assert.deepEqual(shouldAutoPaint('affine:w:p', { artifacts: [] }), {
+    paint: true,
+    reason: 'tree-ready',
+  });
+});
+
+test('R6 tree fingerprint changes on retract / new art (re-paint signal)', () => {
+  const withWhy = {
+    artifacts: [
+      {
+        external_id: 'why-1',
+        kind: 'why',
+        verification: 'verified',
+        parent_id: null as string | null,
+      },
+    ],
+    actors: [{ external_id: 'mlabs:t1', kind: 'team', name: 'T' }],
+  };
+  const empty = { artifacts: [] as typeof withWhy.artifacts, actors: [] };
+  const a = treeImpactFingerprint(withWhy);
+  const b = treeImpactFingerprint(empty);
+  assert.notEqual(a, b);
+  assert.equal(treeImpactFingerprint(withWhy), a);
+  assert.equal(treeImpactFingerprint(null), '');
 });
 
 test('R0 empty engagement tree paints no demo WHY', () => {

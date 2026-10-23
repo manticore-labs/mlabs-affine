@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  buildGateMarkdown,
   canonicalPageUrl,
   cardHeightForText,
   cardWidthForText,
@@ -15,8 +16,10 @@ import {
   humanBridgeError,
   indexingNotice,
   isDocumentIndexing,
+  isGateKind,
   isPaintEngagementAllowed,
   LINE_H,
+  listGateNodes,
   openRequestBody,
   type PageDoc,
   paintPlan,
@@ -69,6 +72,53 @@ test('R0 engagement external_id is affine:workspace:page (not poc-s1)', () => {
   assert.equal(workspaceIdFromPageUrl(url), 'w');
   assert.equal(engagementExternalId('page-1', url), 'affine:w:page-1');
   assert.notEqual(engagementExternalId('page-1', url), 'poc-s1');
+});
+
+test('GAP-CONFIRM gate markdown matches confirm_parse contract', () => {
+  assert.equal(
+    buildGateMarkdown({
+      action: 'confirm',
+      kind: 'what',
+      externalId: 'what-0000',
+    }),
+    '### CONFIRM · what:what-0000\nEsto está confirmado.'
+  );
+  assert.equal(
+    buildGateMarkdown({
+      action: 'retract',
+      kind: 'why',
+      externalId: 'why-0000',
+      humanNote: 'No sigue',
+    }),
+    '### RETRACT · why:why-0000\nNo sigue'
+  );
+  assert.equal(isGateKind('scenario'), false);
+  assert.equal(isGateKind('how'), true);
+  const nodes = listGateNodes({
+    artifacts: [
+      {
+        external_id: 'what-1',
+        kind: 'what',
+        verification: 'unverified',
+        body: { statement: 'Panel' },
+      },
+      {
+        external_id: 'scenario-1',
+        kind: 'scenario',
+        verification: 'unverified',
+        body: { statement: 'Gherkin' },
+      },
+      {
+        external_id: 'why-1',
+        kind: 'why',
+        verification: 'verified',
+        body: { statement: 'SLA' },
+      },
+    ],
+  });
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[0].kind, 'why');
+  assert.equal(nodes[1].kind, 'what');
 });
 
 test('R6 refuse paint for poc-s1 and empty engagement', () => {

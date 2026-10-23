@@ -815,6 +815,76 @@ export function shouldAutoPaint(
   return { paint: true, reason: 'tree-ready' };
 }
 
+/** SG2 R2–R5 gate kinds (CONFIRM/RETRACT path). */
+export type GateKind = 'why' | 'who' | 'how' | 'what';
+export type GateAction = 'confirm' | 'retract';
+
+export function isGateKind(kind: string | undefined | null): kind is GateKind {
+  const k = (kind || '').trim().toLowerCase();
+  return k === 'why' || k === 'who' || k === 'how' || k === 'what';
+}
+
+/**
+ * SoT markdown for LangGraph `confirm_parse` (same contract as doc Fuentes).
+ * FE never PATCH-verifies — ingest must see this text.
+ */
+export function buildGateMarkdown(input: {
+  action: GateAction;
+  kind: GateKind;
+  externalId: string;
+  humanNote?: string;
+}): string {
+  const id = normalizeExtId(input.externalId);
+  const verb = input.action === 'confirm' ? 'CONFIRM' : 'RETRACT';
+  const header = `### ${verb} · ${input.kind}:${id}`;
+  const note = (input.humanNote || '').trim();
+  if (input.action === 'confirm') {
+    return note
+      ? `${header}\nEsto está confirmado.\n\n${note}`
+      : `${header}\nEsto está confirmado.`;
+  }
+  return note ? `${header}\n${note}` : `${header}\nRetractado.`;
+}
+
+export type GateNode = {
+  externalId: string;
+  kind: GateKind;
+  label: string;
+  statement: string;
+  verification: string;
+};
+
+/** Impact artifacts eligible for CONFIRM/RETRACT wizard (excludes scenario). */
+export function listGateNodes(tree: RegistryTree | null): GateNode[] {
+  const refs = assignMethodologyRefs(tree);
+  const out: GateNode[] = [];
+  for (const art of tree?.artifacts ?? []) {
+    if (!isGateKind(art.kind)) continue;
+    const id = normalizeExtId(art.external_id);
+    if (!id || id.includes('smoke')) continue;
+    const refId = refs.get(id);
+    const statement = String(art.body?.statement || '');
+    const base = art.body?.label || statement || art.external_id || id;
+    out.push({
+      externalId: id,
+      kind: art.kind,
+      label: refId ? `${refId} · ${base}` : String(base),
+      statement,
+      verification: String(art.verification || 'unverified'),
+    });
+  }
+  const order: Record<GateKind, number> = {
+    why: 0,
+    who: 1,
+    how: 2,
+    what: 3,
+  };
+  return out.sort(
+    (a, b) =>
+      order[a.kind] - order[b.kind] || a.externalId.localeCompare(b.externalId)
+  );
+}
+
 export function openRequestBody(input: {
   pageId: string;
   pageUrl?: string;

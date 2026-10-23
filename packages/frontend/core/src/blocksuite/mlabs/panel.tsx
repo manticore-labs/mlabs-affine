@@ -7,14 +7,18 @@ import { isDocSyncNoteId, syncFrameworkDocNote } from './doc-sync';
 import * as styles from './panel.css';
 import {
   buildFeedbackNodes,
+  buildGateMarkdown,
   type CanvasNode,
   changeLabel,
   engagementExternalId,
   foreignMinX,
+  type GateAction,
+  type GateNode,
   humanBridgeError,
   indexingNotice,
   isOwnNode,
   isPaintEngagementAllowed,
+  listGateNodes,
   matchFeedbackExternalId,
   MAX_FEEDBACK_FILES,
   openRequestBody,
@@ -97,7 +101,7 @@ export type DifySourcesPanelProps = {
   store?: PaintStore;
   fetchImpl?: FetchLike;
   /** Legacy `why` is ignored — WHY comes from docs→LangGraph only (SG2-R0). */
-  initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar';
+  initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar' | 'confirmar';
   focusFeedback?: boolean;
   /** Pre-select this registry external_id in the 💬 feedback form. */
   initialFeedbackId?: string;
@@ -110,7 +114,7 @@ export function openDifySourcesPanel(input: {
   doc?: PageDoc;
   store?: PaintStore;
   fetchImpl?: FetchLike;
-  initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar';
+  initialTab?: 'fuentes' | 'preguntar' | 'why' | 'pintar' | 'confirmar';
   focusFeedback?: boolean;
   initialFeedbackId?: string;
 }) {
@@ -373,10 +377,14 @@ export function DifySourcesPanel({
   initialFeedbackId,
   onClose,
 }: DifySourcesPanelProps) {
-  const [tab, setTab] = useState<'fuentes' | 'preguntar' | 'pintar'>(
+  const [tab, setTab] = useState<
+    'fuentes' | 'preguntar' | 'confirmar' | 'pintar'
+  >(
     initialTab === 'why'
       ? 'fuentes'
-      : initialTab === 'preguntar' || initialTab === 'pintar'
+      : initialTab === 'preguntar' ||
+          initialTab === 'pintar' ||
+          initialTab === 'confirmar'
         ? initialTab
         : 'fuentes'
   );
@@ -413,6 +421,11 @@ export function DifySourcesPanel({
   const [feedbackPick, setFeedbackPick] = useState(initialFeedbackId ?? '');
   const [feedbackNote, setFeedbackNote] = useState('');
   const [feedbackFiles, setFeedbackFiles] = useState<File[]>([]);
+  const [gateNodes, setGateNodes] = useState<GateNode[]>([]);
+  const [gatePick, setGatePick] = useState('');
+  const [gateNote, setGateNote] = useState('');
+  const [gateAction, setGateAction] = useState<GateAction>('confirm');
+  const [gateConfirmRetract, setGateConfirmRetract] = useState(false);
 
   const remember = useCallback(
     (id: string) => {
@@ -587,6 +600,19 @@ export function DifySourcesPanel({
                 /* keep last known list if refresh fails */
               });
             }
+            if (next === 'confirmar') {
+              void run('No pude cargar el árbol Impact.', async () => {
+                const tree = await fetchRegistryTree(fetchImpl, engagementId);
+                const nodes = listGateNodes(tree);
+                setGateNodes(nodes);
+                if (gatePick && !nodes.some(n => n.externalId === gatePick)) {
+                  setGatePick('');
+                }
+                setGateConfirmRetract(false);
+              }).catch(() => {
+                /* run notifies */
+              });
+            }
           }}
         >
           <Tabs.List className={styles.tabList}>
@@ -599,6 +625,13 @@ export function DifySourcesPanel({
               disabled={!ready}
             >
               Preguntar
+            </Tabs.Trigger>
+            <Tabs.Trigger
+              value="confirmar"
+              className={styles.tabTrigger}
+              disabled={!ready}
+            >
+              Confirmar
             </Tabs.Trigger>
             <Tabs.Trigger value="pintar" className={styles.tabTrigger}>
               {focusFeedback ? '💬 Comentario' : 'Pintar'}
@@ -818,6 +851,191 @@ export function DifySourcesPanel({
                 pdf, md, txt, docx y similares. Hasta 15 MB. Mismo nombre =
                 reemplazo.
               </p>
+            </section>
+          </Tabs.Content>
+
+          <Tabs.Content value="confirmar">
+            <section className={styles.section}>
+              <p className={styles.lead}>
+                Confirmá o retirá un nodo Impact (WHY→WHO→HOW→WHAT). Se escribe
+                la misma señal SoT que LangGraph ya entiende; el panel{' '}
+                <strong>no</strong> marca verified solo.
+              </p>
+              <label className={styles.field}>
+                <span>Nodo</span>
+                <select
+                  className={styles.textarea}
+                  value={gatePick}
+                  disabled={actionBusy || gateNodes.length === 0}
+                  onChange={event => {
+                    setGatePick(event.target.value);
+                    setGateConfirmRetract(false);
+                  }}
+                >
+                  <option value="">
+                    {gateNodes.length === 0
+                      ? 'Sin nodos why/who/how/what en el tree'
+                      : '— elegí nodo —'}
+                  </option>
+                  {gateNodes.map(node => (
+                    <option key={node.externalId} value={node.externalId}>
+                      [{node.kind}/{node.verification}] {node.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.field}>
+                <span>Acción</span>
+                <select
+                  className={styles.textarea}
+                  value={gateAction}
+                  disabled={actionBusy}
+                  onChange={event => {
+                    setGateAction(event.target.value as GateAction);
+                    setGateConfirmRetract(false);
+                  }}
+                >
+                  <option value="confirm">Confirmar</option>
+                  <option value="retract">Retirar (retract)</option>
+                </select>
+              </label>
+              <label className={styles.field}>
+                <span>Nota (opcional)</span>
+                <textarea
+                  className={styles.textarea}
+                  value={gateNote}
+                  onChange={event => setGateNote(event.target.value)}
+                  disabled={actionBusy}
+                  rows={3}
+                  placeholder="Contexto para auditoría / RAG…"
+                />
+              </label>
+              {(() => {
+                const node = gateNodes.find(n => n.externalId === gatePick);
+                const preview =
+                  node &&
+                  buildGateMarkdown({
+                    action: gateAction,
+                    kind: node.kind,
+                    externalId: node.externalId,
+                    humanNote: gateNote,
+                  });
+                return preview ? (
+                  <label className={styles.field}>
+                    <span>Preview SoT (inmutable al enviar)</span>
+                    <textarea
+                      className={styles.textarea}
+                      value={preview}
+                      readOnly
+                      rows={5}
+                    />
+                  </label>
+                ) : null;
+              })()}
+              {gateAction === 'retract' && !gateConfirmRetract ? (
+                <p className={styles.lead}>
+                  Retirar puede soft-delete hipótesis hijas. Confirmá el segundo
+                  paso.
+                </p>
+              ) : null}
+              <div className={styles.actions}>
+                {gateAction === 'retract' && !gateConfirmRetract ? (
+                  <Button
+                    variant="primary"
+                    disabled={!ready || actionBusy || !gatePick}
+                    onClick={() => setGateConfirmRetract(true)}
+                  >
+                    Entiendo — continuar retract
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    disabled={
+                      !ready ||
+                      actionBusy ||
+                      !gatePick ||
+                      !datasetId ||
+                      gateNodes.length === 0
+                    }
+                    loading={actionBusy}
+                    onClick={() =>
+                      void run(
+                        'No pude enviar el gate CONFIRM/RETRACT.',
+                        async () => {
+                          if (!datasetId) return;
+                          const node = gateNodes.find(
+                            n => n.externalId === gatePick
+                          );
+                          if (!node) throw new Error('Elegí un nodo Impact.');
+                          const note = buildGateMarkdown({
+                            action: gateAction,
+                            kind: node.kind,
+                            externalId: node.externalId,
+                            humanNote: gateNote,
+                          });
+                          const response = await fetchImpl(
+                            `${FRAMEWORK}/feedback`,
+                            {
+                              method: 'POST',
+                              headers: {
+                                'content-type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                dataset_id: datasetId,
+                                page_id: pageId,
+                                external_id: node.externalId,
+                                kind: node.kind,
+                                label: node.label,
+                                statement: node.statement,
+                                note,
+                                engagement_id: engagementId,
+                                request_id: crypto.randomUUID(),
+                              }),
+                            }
+                          );
+                          if (!response.ok) {
+                            throw new Error(await readBridgeError(response));
+                          }
+                          const body = (await response.json()) as {
+                            document?: { name?: string };
+                            ingest?: { status?: string };
+                          };
+                          notify.success({
+                            title: 'Mlabs Framework',
+                            message: `${gateAction === 'confirm' ? 'CONFIRM' : 'RETRACT'} enviado: ${body.document?.name ?? node.externalId}${body.ingest?.status ? ` · ingest ${body.ingest.status}` : ''}`,
+                          });
+                          setGateNote('');
+                          setGateConfirmRetract(false);
+                          const tree = await fetchRegistryTree(
+                            fetchImpl,
+                            engagementId
+                          );
+                          setGateNodes(listGateNodes(tree));
+                          await refresh(datasetId);
+                        }
+                      )
+                    }
+                  >
+                    Enviar gate
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  disabled={actionBusy}
+                  onClick={() =>
+                    void run('No pude refrescar el árbol.', async () => {
+                      const tree = await fetchRegistryTree(
+                        fetchImpl,
+                        engagementId
+                      );
+                      setGateNodes(listGateNodes(tree));
+                      setGateConfirmRetract(false);
+                    })
+                  }
+                >
+                  Refrescar tree
+                </Button>
+              </div>
             </section>
           </Tabs.Content>
 

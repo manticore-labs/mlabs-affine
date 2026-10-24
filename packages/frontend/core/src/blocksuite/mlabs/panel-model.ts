@@ -1784,14 +1784,26 @@ export function paintPlanFromTree(
   const rows = whyList.map(why => {
     const whyExt = why.external_id;
     const whyRef = methRefs.get(normalizeExtId(whyExt));
-    const children = why.id
-      ? (byParent.get(String(why.id)) ?? [])
+    // Registry LIVE chain is why→who→how→what (R2–R5). Also accept flat
+    // why→{who,how,what} (fixtures/tests). Union both so T2 shapes==tree.
+    const whyKids = why.id ? (byParent.get(String(why.id)) ?? []) : [];
+    const whoArts = why.id
+      ? whyKids.filter(c => c.kind === 'who')
       : artifacts.filter(
           a =>
-            a.kind !== 'why' &&
-            a.kind !== 'scenario' &&
+            a.kind === 'who' &&
             a.external_id.includes(whyExt.replace('why-', ''))
         );
+    const howNested = whoArts.flatMap(
+      w => (w.id ? (byParent.get(String(w.id)) ?? []) : []).filter(c => c.kind === 'how')
+    );
+    const howFlat = whyKids.filter(c => c.kind === 'how');
+    const howArts = [...new Map([...howNested, ...howFlat].map(a => [a.id || a.external_id, a])).values()];
+    const whatNested = howArts.flatMap(
+      h => (h.id ? (byParent.get(String(h.id)) ?? []) : []).filter(c => c.kind === 'what')
+    );
+    const whatFlat = whyKids.filter(c => c.kind === 'what');
+    const whatArts = [...new Map([...whatNested, ...whatFlat].map(a => [a.id || a.external_id, a])).values()];
     const packKids = (kids: typeof artifacts, kind: PaintRole): KidPack[] =>
       kids.map(c => {
         const label = c.body?.label || kind.toUpperCase();
@@ -1859,18 +1871,9 @@ export function paintPlanFromTree(
       whyQRef,
       whyQW,
       whyQH,
-      who: packKids(
-        children.filter(c => c.kind === 'who'),
-        'who'
-      ),
-      how: packKids(
-        children.filter(c => c.kind === 'how'),
-        'how'
-      ),
-      what: packKids(
-        children.filter(c => c.kind === 'what'),
-        'what'
-      ),
+      who: packKids(whoArts, 'who'),
+      how: packKids(howArts, 'how'),
+      what: packKids(whatArts, 'what'),
     };
   });
 

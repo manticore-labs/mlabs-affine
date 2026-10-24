@@ -980,9 +980,10 @@ export function DifySourcesPanel({
                               headers: {
                                 'content-type': 'application/json',
                               },
-                              body: JSON.stringify({
+                                body: JSON.stringify({
                                 dataset_id: datasetId,
                                 page_id: pageId,
+                                page_url: pageUrl,
                                 external_id: node.externalId,
                                 kind: node.kind,
                                 label: node.label,
@@ -1215,6 +1216,7 @@ export function DifySourcesPanel({
                                 body: JSON.stringify({
                                   dataset_id: datasetId,
                                   page_id: pageId,
+                                  page_url: pageUrl,
                                   external_id: node.externalId,
                                   kind: node.kind,
                                   label: node.label,

@@ -1,11 +1,12 @@
 {
-  "map_revision": "rev-4",
+  "map_id": "map:demo",
+  "map_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "map_revision_seq": 4,
-  "map_revision_at": "2026-11-10T15:00:00Z",
-  "painted_revision": "rev-2",
-  "painted_revision_seq": 2,
-  "painted_revision_at": "2026-11-09T10:00:00Z",
-  "painted_at": "2026-11-09T10:05:00Z",
+  "map_revision_at": "2026-11-06T19:00:00Z",
+  "painted_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "painted_revision_seq": 1,
+  "painted_revision_at": "2026-11-05T14:00:00Z",
+  "painted_at": "2026-11-05T14:05:00Z",
   "needs_paint": true,
-  "versions_behind": 2
+  "versions_behind": 3
 }

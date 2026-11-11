@@ -1,9 +1,11 @@
 import { Button, Input, Loading, Modal, notify, Tabs } from '@affine/component';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Y from 'yjs';
 
 import { isDocSyncNoteId, syncFrameworkDocNote } from './doc-sync';
+import { createBridgeMapPaintClient } from './map-paint-api';
+import { MapPaintBanner } from './map-paint-banner';
 import * as styles from './panel.css';
 import {
   buildFeedbackNodes,
@@ -426,6 +428,12 @@ export function DifySourcesPanel({
   const [gateNote, setGateNote] = useState('');
   const [gateAction, setGateAction] = useState<GateAction>('confirm');
   const [gateConfirmRetract, setGateConfirmRetract] = useState(false);
+
+  /** SDE-2140: map_revision banner → bridge GET (Mateo SDE-2117 contract; HTTP residual). */
+  const mapPaintClient = useMemo(
+    () => createBridgeMapPaintClient(FRAMEWORK),
+    []
+  );
 
   const remember = useCallback(
     (id: string) => {
@@ -1267,6 +1275,10 @@ export function DifySourcesPanel({
                     <code>💬 mlabs</code>, o slash{' '}
                     <code>💬 Comentario Mlabs</code>.
                   </p>
+                  <MapPaintBanner
+                    mapId={engagementId}
+                    client={mapPaintClient}
+                  />
                   <div className={styles.actions}>
                     <Button
                       variant="primary"
@@ -1291,7 +1303,7 @@ export function DifySourcesPanel({
                         })
                       }
                     >
-                      Pintar
+                      Pintar lienzo
                     </Button>
                   </div>
                 </>

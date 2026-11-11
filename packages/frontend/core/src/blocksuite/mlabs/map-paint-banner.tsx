@@ -10,7 +10,7 @@ export type MapPaintBannerProps = {
 };
 
 /**
- * Banner pintado vs actual + CTA Pintar.
+ * Banner pintado vs actual + CTA Pintar (gate I1 / map_revision).
  * needs_paint / versions_behind solo desde API — no recalcular hash/seq acá.
  */
 export function MapPaintBanner({ mapId, client, initial }: MapPaintBannerProps) {
@@ -32,13 +32,13 @@ export function MapPaintBanner({ mapId, client, initial }: MapPaintBannerProps) 
   }, [client, mapId]);
 
   const onPaint = useCallback(async () => {
+    if (!state) return;
     setLoading(true);
     setError(null);
-    const result = await client.paint(mapId);
+    const result = await client.paint(mapId, state.map_revision);
     if (!result.ok) {
-      // sin paint optimista
       setError(result.code);
-      if (result.code === 'paint_stale') {
+      if (result.code === 'PAINT_STALE') {
         try {
           setState(await client.getPaintState(mapId));
         } catch {
@@ -50,7 +50,7 @@ export function MapPaintBanner({ mapId, client, initial }: MapPaintBannerProps) 
     }
     setState(result.state);
     setLoading(false);
-  }, [client, mapId]);
+  }, [client, mapId, state]);
 
   if (!state) {
     return (
@@ -67,7 +67,7 @@ export function MapPaintBanner({ mapId, client, initial }: MapPaintBannerProps) 
     return <div data-testid="map-paint-uptodate">Mapa al día</div>;
   }
 
-  const firstPaint = state.painted_at == null;
+  const firstPaint = state.painted_at == null && state.painted_revision == null;
   return (
     <div data-testid="map-paint-banner" role="status">
       <p>
@@ -76,7 +76,8 @@ export function MapPaintBanner({ mapId, client, initial }: MapPaintBannerProps) 
           : `${state.versions_behind} versión(es) atrás.`}
       </p>
       <p data-testid="map-paint-compare">
-        Pintado: {state.painted_revision_at ?? '—'} · Actual: {state.map_revision_at ?? '—'}
+        Pintado: {state.painted_revision_at ?? '—'} · Actual:{' '}
+        {state.map_revision_at ?? '—'}
       </p>
       <button
         type="button"

@@ -1,22 +1,19 @@
-# PR8 — FE Pintar Affine (pack Alejo)
+# PR8 — FE Pintar Affine (SDE-2140)
 
-**Depende** del contrato GET/paint de PR6 (o mocks de este pack).
+**Depende** de Mateo **SDE-2117 / PR #11** (`map_revision` + `MapStore.get_map_state` / `confirm_paint`).
 
-## Qué hacer
+## Estado
 
-1. Copiá estos archivos al repo `modules/affine/...` (mismas rutas relativas).
-2. Cableá `MapPaintBanner` dentro del panel Mlabs (`panel.tsx`) cuando el mapa exista — **sin inventar hashes/seq en el FE**.
-3. Corré tests del mock (Vitest/node del paquete frontend, según el repo).
+- Tipos/fixtures alineados a `contracts/map_revision.schema.json` (sha256 64 hex, `map_id`, `needs_paint`, `versions_behind`).
+- `MapPaintBanner` cableado en tab **Pintar** del panel (`panel.tsx`).
+- Cliente `createBridgeMapPaintClient(FRAMEWORK)` espera:
+  - `GET {base}/maps/{mapId}/paint_state` → Map GET state
+  - `POST {base}/maps/{mapId}/paint` body `{ map_revision }` → paint_state; luego re-GET
+- **HTTP del bridge aún residual** en PR #11 (Mateo lo marcó P1). Hasta que exista ruta, el banner falla al cargar / se usa mock en tests.
 
-## Archivos
+## Errores tipados (Mateo)
 
-| Relativo al repo | Rol |
-|---|---|
-| `.../mlabs/map-paint-types.ts` | Tipos freeze PR6 |
-| `.../mlabs/map-paint-api.ts` | Cliente GET + paint (inyectable) |
-| `.../mlabs/map-paint-banner.tsx` | Banner + botón Pintar |
-| `.../mlabs/map-paint-banner.test.ts` | FE-AC1/2/5/6 con mock |
-| `.../mlabs/fixtures/map-paint.*.json` | Respuestas mock |
+`PAINT_STALE` · `PAINT_UNAUTHORIZED` · `PAINT_NOT_READY` · `MAP_REGISTRY_UNAVAILABLE`
 
 ## No hacer
 

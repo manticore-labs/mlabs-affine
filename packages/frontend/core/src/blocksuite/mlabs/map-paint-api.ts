@@ -26,10 +26,13 @@ function failCodeFromBody(body: unknown, httpStatus: number): PaintFailCode {
 }
 
 /**
- * Cliente bridge → contrato Mateo's MapStore (HTTP aún residual en PR #11).
- * Paths esperados cuando el bridge exponga GET/POST.
+ * Cliente bridge → MapStore HTTP (`/mlabs/framework/maps/...`).
+ * Opcional `paintToken` → header `x-mlabs-bridge-token` (default lab: bridge-token).
  */
-export function createBridgeMapPaintClient(baseUrl: string): MapPaintClient {
+export function createBridgeMapPaintClient(
+  baseUrl: string,
+  paintToken = 'bridge-token'
+): MapPaintClient {
   const root = baseUrl.replace(/\/$/, '');
 
   async function getPaintState(mapId: string): Promise<MapPaintState> {
@@ -44,11 +47,15 @@ export function createBridgeMapPaintClient(baseUrl: string): MapPaintClient {
     getPaintState,
     async paint(mapId: string, mapRevision: string) {
       try {
+        const headers: Record<string, string> = {
+          'content-type': 'application/json',
+        };
+        if (paintToken) headers['x-mlabs-bridge-token'] = paintToken;
         const res = await fetch(
           `${root}/maps/${encodeURIComponent(mapId)}/paint`,
           {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers,
             body: JSON.stringify({ map_revision: mapRevision }),
           }
         );
